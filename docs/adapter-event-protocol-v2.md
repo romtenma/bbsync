@@ -258,16 +258,16 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | フィールド | 型 | 必須 | 制約・意味 |
 | --- | --- | --- | --- |
 | `scope` | string | Yes | 5.4節の共通キー |
-| `targetType` | `ID`、`BBSSLIP`、`TEXT` | Yes | 対象の種類 |
+| `targetType` | string | Yes | 専用ブラウザが定義する対象の種類。推奨値の例: `ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD` |
 | `target` | string | Yes | 対象の文字列。空は禁止 |
-| `effect` | `HIDE`、`TRANSPARENT`、`HIGHLIGHT` | Yes | 一致時の表示効果 |
+| `effect` | string | Yes | 専用ブラウザが定義する一致時の表示効果。推奨値の例: `OMIT`、`TRANSPARENT`、`HIGHLIGHT` |
 | `updatedAt` | string | Yes | このフィルターの意味上の更新日時 |
 | `hitAt` | string または `null` | No | 条件がスレッド内で最後に検出された日時 |
 
 同じ `(scope, targetType, target)` に新しい `effect` を設定した場合は、同じフィルターの表示効果を更新する。`updatedAt` は競合解決に使われ、通常は `occurredAt` と同じ値にする。
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440006","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","type":"filter.set","scope":"5ch/software","targetType":"ID","target":"ABCDEFG","effect":"HIDE","updatedAt":"2026-09-20T01:28:00.000Z","hitAt":"2026-09-20T01:27:59.000Z"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440006","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","type":"filter.set","scope":"5ch/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","updatedAt":"2026-09-20T01:28:00.000Z","hitAt":"2026-09-20T01:27:59.000Z"}
 ```
 
 ### 7.8 `filter.cleared`
@@ -277,7 +277,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | フィールド | 型 | 制約 |
 | --- | --- | --- |
 | `scope` | string | 5.4節の共通キー |
-| `targetType` | `ID`、`BBSSLIP`、`TEXT` | 解除対象の種類 |
+| `targetType` | string | 解除対象の種類。値は専用ブラウザが定義する。推奨値の例: `ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD` |
 | `target` | string | 解除対象と完全一致 |
 | `updatedAt` | string | 意味上の更新日時 |
 
@@ -287,25 +287,30 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 ### 7.9 フィルター対象と表示効果
 
-`targetType` と `target` の組で、条件とする対象を表す。
+`targetType` と `target` の組で、条件とする対象を表す。`targetType`の値は専用ブラウザが定義する。以下は推奨値の例であり、これらに限定されない。
 
-| `targetType` | 意味 | 比較 |
+| `targetType` | 推奨する意味 | 比較 |
 | --- | --- | --- |
 | `ID` | 投稿者IDとの完全一致 | 大文字小文字を含めサイト表示値どおり |
-| `BBSSLIP` | BBS_SLIP 表示値との完全一致 | サイト表示値どおり |
-| `TEXT` | 本文に含まれる固定文字列 | Unicode NFC、文字列一致 |
+| `SLIP` | BBS_SLIP 表示値との完全一致 | サイト表示値どおり |
+| `SLIP-PRE` | BBS_SLIP の前半との一致 | サイト表示値どおり |
+| `SLIP-SUF` | BBS_SLIP の後半との一致 | サイト表示値どおり |
+| `MAIL` | メール欄との一致 | 専用ブラウザの仕様による |
+| `NAME` | 名前欄との一致 | 専用ブラウザの仕様による |
+| `TRIP` | トリップとの一致 | 専用ブラウザの仕様による |
+| `WORD` | 本文に含まれる文字列との一致 | Unicode NFC、文字列一致 |
 
-`effect` は次のいずれかとする。
+`effect`の値も専用ブラウザが定義する。以下は推奨値の例であり、これらに限定されない。
 
 | `effect` | 意味 |
 | --- | --- |
-| `HIDE` | 完全に非表示 |
+| `OMIT` | 完全に非表示 |
 | `TRANSPARENT` | 透明または目立たない表示 |
 | `HIGHLIGHT` | 強調表示 |
 
 ### 7.10 `effect` の解釈
 
-`effect` の具体的な色、透明度、アニメーションなどはクライアントが決定する。ただし、`HIDE` は対象を通常の表示対象から除外し、`HIGHLIGHT` は対象を識別できる強調表示にしなければならない。未対応の `targetType` または `effect` を受信したアダプターは、そのフィルターをローカルで適用しなくてもよい。
+`effect` の具体的な色、透明度、アニメーションなどはクライアントが決定する。ただし、推奨値の `OMIT` は対象を通常の表示対象から除外し、`HIGHLIGHT` は対象を識別できる強調表示にすることが望ましい。未対応の `targetType` または `effect` を受信したアダプターは、そのフィルターをローカルで適用しなくてもよい。
 
 ## 8. 状態の統合規則
 

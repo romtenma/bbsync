@@ -165,7 +165,7 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
       scope: "5ch/software",
       targetType: "ID",
       target: "ABCDEFG",
-      effect: "HIDE",
+      effect: "OMIT",
       updatedAt: "2026-09-20T00:00:04.000Z",
       hitAt: "2026-09-20T00:00:03.500Z",
     },

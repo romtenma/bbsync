@@ -38,11 +38,11 @@ await sync.clearFavorite("@5ch/software/1234567890");
 await sync.recordPost("@5ch/software/1234567890", 126);
 
 // フィルターは対象種別・対象文字列・表示効果を分けて同期する
-await sync.setFilter("@5ch/software", "ID", "ABCDEFG", "HIDE");
-await sync.setFilter("@5ch/software", "BBSSLIP", "xxxx-yyyy", "TRANSPARENT", {
+await sync.setFilter("@5ch/software", "ID", "ABCDEFG", "OMIT");
+await sync.setFilter("@5ch/software", "SLIP", "xxxx-yyyy", "TRANSPARENT", {
   hitAt: "2026-09-20T01:22:00.000Z",
 });
-await sync.setFilter("@5ch/software", "TEXT", "NGワード", "HIGHLIGHT");
+await sync.setFilter("@5ch/software", "WORD", "NGワード", "HIGHLIGHT");
 const filters = await sync.getFilters("@5ch/software");
 await sync.clearFilter("@5ch/software", "ID", "ABCDEFG");
 
@@ -65,7 +65,7 @@ normalizeSiteKey("https://sub.testtest.net/board/");
 // "sub.testtest.net"
 ```
 
-フィルターは、`scope`、`targetType`、`target`の組で対象を識別し、`effect`で一致時の表示効果を指定します。`targetType`は`ID`、`BBSSLIP`、`TEXT`のいずれか、`effect`は`HIDE`、`TRANSPARENT`、`HIGHLIGHT`のいずれかです。`scope`には`@5ch/software`のようなサイト・板キーを指定します。
+フィルターは、`scope`、`targetType`、`target`の組で対象を識別し、`effect`で一致時の表示効果を指定します。`targetType`と`effect`の値は専用ブラウザが定義します。推奨値の例は、`targetType`が`ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD`、`effect`が`OMIT`、`TRANSPARENT`、`HIGHLIGHT`です。`scope`には`@5ch/software`のようなサイト・板キーを指定します。
 
 フィルター情報には必須の`updatedAt`と、条件がスレッド内に現れた日時を表す任意の`hitAt`があります。`updatedAt`を省略した場合はローカル時計から自動設定されます。解除も同期され、古いオフライン端末の更新によって復活しないように扱われます。
 
@@ -94,7 +94,7 @@ bbsync-data/
 ```json
 {"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:40.000Z","threadId":"@5ch/software/1234567890","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1234567890/"}
 {"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"@5ch/software/1234567890","type":"thread.viewed","position":125}
-{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"filter.set","scope":"@5ch/software","targetType":"ID","target":"ABCDEFG","effect":"HIDE","updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
+{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"filter.set","scope":"@5ch/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
 ```
 
 ## 統合規則

@@ -165,7 +165,7 @@ export function projectFilterStates(
           scope: event.scope,
           targetType: event.targetType,
           target: event.target,
-          effect: "HIDE",
+          effect: "OMIT",
           updatedAt: event.updatedAt,
           cleared: true,
           deviceId: event.deviceId,

@@ -289,8 +289,8 @@ export function assertFilterKey(
   if (typeof scope !== "string" || scope.length === 0) {
     throw new TypeError("filter scope must be a non-empty string");
   }
-  if (targetType !== "ID" && targetType !== "BBSSLIP" && targetType !== "TEXT") {
-    throw new TypeError("filter targetType must be ID, BBSSLIP, or TEXT");
+  if (typeof targetType !== "string" || targetType.length === 0) {
+    throw new TypeError("filter targetType must be a non-empty string");
   }
   if (typeof target !== "string" || target.length === 0) {
     throw new TypeError("filter target must be a non-empty string");
@@ -298,8 +298,8 @@ export function assertFilterKey(
 }
 
 export function assertFilterEffect(value: unknown, name = "filter effect"): void {
-  if (value !== "HIDE" && value !== "TRANSPARENT" && value !== "HIGHLIGHT") {
-    throw new TypeError(`${name} must be HIDE, TRANSPARENT, or HIGHLIGHT`);
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${name} must be a non-empty string`);
   }
 }
 

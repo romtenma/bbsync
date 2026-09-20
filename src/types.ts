@@ -41,8 +41,11 @@ export interface SnapshotThreadState {
   readonly postPositions: readonly number[];
 }
 
-export type FilterTargetType = "ID" | "BBSSLIP" | "TEXT";
-export type FilterEffect = "HIDE" | "TRANSPARENT" | "HIGHLIGHT";
+/** A browser-defined filter target type. */
+export type FilterTargetType = string;
+
+/** A browser-defined filter effect. */
+export type FilterEffect = string;
 
 export interface SnapshotFilter {
   readonly scope: string;

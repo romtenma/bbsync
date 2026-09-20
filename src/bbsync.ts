@@ -17,6 +17,8 @@ import {
   type StateSnapshot,
   type ThreadState,
   type FilterEntry,
+  type FilterTargetType,
+  type FilterEffect,
 } from "./types.js";
 import {
   assertDateTime,
@@ -112,9 +114,9 @@ export class BbsSync {
 
   async addFilter(
     scope: string,
-    targetType: "ID" | "BBSSLIP" | "TEXT",
+    targetType: FilterTargetType,
     target: string,
-    effect: "HIDE" | "TRANSPARENT" | "HIGHLIGHT",
+    effect: FilterEffect,
     options: { readonly updatedAt?: string; readonly hitAt?: string | null } = {},
   ): Promise<SyncEvent> {
     const [event] = await this.append([{
@@ -131,9 +133,9 @@ export class BbsSync {
 
   async setFilter(
     scope: string,
-    targetType: "ID" | "BBSSLIP" | "TEXT",
+    targetType: FilterTargetType,
     target: string,
-    effect: "HIDE" | "TRANSPARENT" | "HIGHLIGHT",
+    effect: FilterEffect,
     options: { readonly updatedAt?: string; readonly hitAt?: string | null } = {},
   ): Promise<SyncEvent> {
     return this.addFilter(scope, targetType, target, effect, options);
@@ -141,7 +143,7 @@ export class BbsSync {
 
   async removeFilter(
     scope: string,
-    targetType: "ID" | "BBSSLIP" | "TEXT",
+    targetType: FilterTargetType,
     target: string,
     options: { readonly updatedAt?: string } = {},
   ): Promise<SyncEvent> {
@@ -157,7 +159,7 @@ export class BbsSync {
 
   async clearFilter(
     scope: string,
-    targetType: "ID" | "BBSSLIP" | "TEXT",
+    targetType: FilterTargetType,
     target: string,
     options: { readonly updatedAt?: string } = {},
   ): Promise<SyncEvent> {
