@@ -9,7 +9,7 @@ test("normalizes registered sites to their stable @ keys", () => {
   assert.equal(normalizeSiteKey("https://WWW.2CH.NET."), "@5ch");
   assert.equal(normalizeSiteKey("https://sub.bbspink.com/"), "@bbspink");
   assert.equal(normalizeSiteKey("https://open2ch.net:443/"), "@open2ch");
-  assert.equal(normalizeSiteKey("https://foo.machi.io/"), "@machi");
+  assert.equal(normalizeSiteKey("https://foo.machi.to/"), "@machi");
   assert.equal(normalizeSiteKey("https://jbbs.shitaraba.net/"), "@shitaraba");
 });
 

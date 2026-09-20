@@ -25,7 +25,7 @@ export const KNOWN_SITE_PROFILES: readonly SiteProfile[] = Object.freeze([
   }),
   Object.freeze({
     siteKey: "@machi",
-    domains: Object.freeze(["machi.io"]),
+    domains: Object.freeze(["machi.to"]),
   }),
   Object.freeze({
     siteKey: "@shitaraba",

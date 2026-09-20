@@ -103,7 +103,7 @@ v1 の規定サイトプロファイルは次のとおりである。ホスト�
 | `@5ch` | `5ch.net`, `5ch.io`, `2ch.net` |
 | `@bbspink` | `bbspink.com` |
 | `@open2ch` | `open2ch.net` |
-| `@machi` | `machi.io` |
+| `@machi` | `machi.to` |
 | `@shitaraba` | `jbbs.shitaraba.net` |
 
 5ch の `board-key` と `thread-key` は次の規則で生成する。
