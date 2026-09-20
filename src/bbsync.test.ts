@@ -477,6 +477,63 @@ test("uses locale-independent ordinal tie-breaks", () => {
   assert.equal(filter?.deviceId, "device_a");
 });
 
+test("retains only the newest global post positions across threads during compaction", async () => {
+  const fixture = await createFixture(10, 0);
+  try {
+    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    await sync.append([
+      { type: "thread.post.recorded", threadId: "thread-1", position: 10, occurredAt: "2026-09-01T00:00:00Z" },
+      { type: "thread.post.recorded", threadId: "thread-2", position: 20, occurredAt: "2026-09-02T00:00:00Z" },
+      { type: "thread.post.recorded", threadId: "thread-1", position: 11, occurredAt: "2026-09-03T00:00:00Z" },
+      { type: "thread.post.recorded", threadId: "thread-3", position: 30, occurredAt: "2026-09-04T00:00:00Z" },
+      { type: "thread.post.recorded", threadId: "thread-2", position: 21, occurredAt: "2026-09-05T00:00:00Z" },
+    ]);
+
+    const snapshot = await sync.compact({ maxGlobalPostPositions: 3 });
+    const thread1 = snapshot.threads.find((t) => t.threadId === "thread-1");
+    const thread2 = snapshot.threads.find((t) => t.threadId === "thread-2");
+    const thread3 = snapshot.threads.find((t) => t.threadId === "thread-3");
+
+    // The 3 newest posts are: thread-1:11 (09-03), thread-3:30 (09-04), thread-2:21 (09-05)
+    // Older posts (thread-1:10, thread-2:20) are trimmed
+    assert.deepEqual(thread1?.postPositions, [11]);
+    assert.deepEqual(thread2?.postPositions, [21]);
+    assert.deepEqual(thread3?.postPositions, [30]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("prunes inactive threads (older than 30 days, no favorite, no posts) from snapshot", async () => {
+  const fixture = await createFixture(10, 0);
+  try {
+    // Current sync time is 2026-09-30
+    const sync = createSync(fixture.left, "desktop", "2026-09-30T00:00:00Z");
+    await sync.append([
+      // Thread A: Viewed 40 days ago (2026-08-21), no favorite, no posts -> should be pruned
+      { type: "thread.viewed", threadId: "thread-a", position: 5, occurredAt: "2026-08-21T00:00:00Z" },
+      // Thread B: Viewed 40 days ago, but has active favorite -> must be kept
+      { type: "thread.viewed", threadId: "thread-b", position: 10, occurredAt: "2026-08-21T00:00:00Z" },
+      { type: "thread.favorite.set", threadId: "thread-b", level: 3, occurredAt: "2026-08-21T00:00:00Z" },
+      // Thread C: Viewed 40 days ago, but has post position -> must be kept
+      { type: "thread.viewed", threadId: "thread-c", position: 15, occurredAt: "2026-08-21T00:00:00Z" },
+      { type: "thread.post.recorded", threadId: "thread-c", position: 12, occurredAt: "2026-08-21T00:00:00Z" },
+      // Thread D: Viewed 10 days ago (2026-09-20), within 30 days -> must be kept
+      { type: "thread.viewed", threadId: "thread-d", position: 20, occurredAt: "2026-09-20T00:00:00Z" },
+      // Thread E: Viewed 40 days ago, favorite set and cleared -> should be pruned
+      { type: "thread.viewed", threadId: "thread-e", position: 25, occurredAt: "2026-08-21T00:00:00Z" },
+      { type: "thread.favorite.set", threadId: "thread-e", level: 2, occurredAt: "2026-08-21T00:00:00Z" },
+      { type: "thread.favorite.cleared", threadId: "thread-e", occurredAt: "2026-08-21T01:00:00Z" },
+    ]);
+
+    const snapshot = await sync.compact();
+    const threadIds = snapshot.threads.map((t) => t.threadId);
+    assert.deepEqual(threadIds, ["thread-b", "thread-c", "thread-d"]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 async function createFixture(
   maxEventsPerSegment = 1_000,
   retainSegmentsPerDevice = 1,

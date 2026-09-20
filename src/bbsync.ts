@@ -9,6 +9,7 @@ import type { EventStore } from "./store.js";
 import { synchronizeStores } from "./synchronize.js";
 import {
   EVENT_SCHEMA_VERSION,
+  type CompactOptions,
   type FavoriteLevel,
   type SyncEvent,
   type SyncEventInput,
@@ -217,7 +218,7 @@ export class BbsSync {
     return synchronizeStores(this.storage, remote);
   }
 
-  async compact(): Promise<StateSnapshot> {
+  async compact(options?: CompactOptions): Promise<StateSnapshot> {
     const states = await readProjectedStates(this.storage);
     const filters = await readProjectedFilters(this.storage);
     const previous = await this.storage.readSnapshot(this.deviceId);
@@ -236,6 +237,7 @@ export class BbsSync {
       coveredSegments,
       states,
       filters,
+      options,
     );
     await this.storage.writeSnapshot(snapshot);
     await this.storage.pruneSegments(snapshot);

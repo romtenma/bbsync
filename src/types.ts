@@ -236,3 +236,14 @@ export interface SynchronizeResult {
   readonly copiedSnapshotsToLeft: number;
   readonly copiedSnapshotsToRight: number;
 }
+
+export const DEFAULT_MAX_GLOBAL_POST_POSITIONS = 1_000;
+export const DEFAULT_THREAD_RETENTION_PERIOD_MS = 30 * 24 * 60 * 60 * 1_000;
+
+export interface CompactOptions {
+  /** Maximum number of total post positions across all threads to retain. Defaults to 1,000. */
+  readonly maxGlobalPostPositions?: number;
+  /** Inactive thread retention period in milliseconds. Defaults to 30 days. */
+  readonly retentionPeriodMs?: number;
+}
+

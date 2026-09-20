@@ -9,6 +9,7 @@ export {
   readProjectedStates,
   snapshotFromStates,
   type ProjectedFilterState,
+  type ProjectedPostRecord,
   type ProjectedThreadState,
 } from "./project.js";
 export { segmentKey, type EventStore } from "./store.js";
@@ -20,7 +21,10 @@ export {
   type SiteProfile,
 } from "./site.js";
 export {
+  DEFAULT_MAX_GLOBAL_POST_POSITIONS,
+  DEFAULT_THREAD_RETENTION_PERIOD_MS,
   EVENT_SCHEMA_VERSION,
+  type CompactOptions,
   type EventSchemaVersion,
   type FavoriteClearedEvent,
   type FavoriteClearedInput,

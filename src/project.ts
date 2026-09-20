@@ -1,25 +1,37 @@
 import type { EventStore } from "./store.js";
-import { EVENT_SCHEMA_VERSION } from "./types.js";
-import type {
-  FavoriteClearedEvent,
-  FavoriteSetEvent,
-  SegmentCoverage,
-  SnapshotFavorite,
-  SnapshotThreadMetadata,
-  SnapshotThreadState,
-  SnapshotViewed,
-  SnapshotFilter,
-  StateSnapshot,
-  SyncEvent,
-  ThreadState,
-  FavoriteLevel,
-  FilterEntry,
+import {
+  DEFAULT_MAX_GLOBAL_POST_POSITIONS,
+  DEFAULT_THREAD_RETENTION_PERIOD_MS,
+  EVENT_SCHEMA_VERSION,
+  type CompactOptions,
+  type FavoriteClearedEvent,
+  type FavoriteSetEvent,
+  type SegmentCoverage,
+  type SnapshotFavorite,
+  type SnapshotThreadMetadata,
+  type SnapshotThreadState,
+  type SnapshotViewed,
+  type SnapshotFilter,
+  type StateSnapshot,
+  type SyncEvent,
+  type ThreadState,
+  type FavoriteLevel,
+  type FilterEntry,
 } from "./types.js";
+
+export interface ProjectedPostRecord {
+  readonly threadId: string;
+  readonly position: number;
+  readonly occurredAt: string;
+  readonly deviceId: string;
+  readonly eventId: string;
+}
 
 export interface ProjectedThreadState extends ThreadState {
   readonly metadata?: SnapshotThreadMetadata;
   readonly lastViewed?: SnapshotViewed;
   readonly favoriteEvent?: SnapshotFavorite;
+  readonly postRecords?: readonly ProjectedPostRecord[];
 }
 
 export interface ProjectedFilterState extends FilterEntry {
@@ -37,6 +49,7 @@ interface MutableThreadState {
   favoriteLevel?: FavoriteLevel;
   favoriteEvent?: SnapshotFavorite;
   postPositions: Set<number>;
+  postRecords: Map<number, ProjectedPostRecord>;
 }
 
 interface MutableFilterState extends ProjectedFilterState {}
@@ -89,32 +102,106 @@ export function snapshotFromStates(
   coveredSegments: readonly SegmentCoverage[],
   states: ReadonlyMap<string, ProjectedThreadState>,
   filters: ReadonlyMap<string, ProjectedFilterState> = new Map(),
+  options: CompactOptions = {},
 ): StateSnapshot {
+  const maxGlobalPostPositions =
+    options.maxGlobalPostPositions ?? DEFAULT_MAX_GLOBAL_POST_POSITIONS;
+  const retentionPeriodMs =
+    options.retentionPeriodMs ?? DEFAULT_THREAD_RETENTION_PERIOD_MS;
+  const createdAtMs = Date.parse(createdAt);
+
+  const allPostRecords: ProjectedPostRecord[] = [];
+  for (const state of states.values()) {
+    if (state.postRecords !== undefined && state.postRecords.length > 0) {
+      allPostRecords.push(...state.postRecords);
+    } else {
+      for (const position of state.postPositions) {
+        allPostRecords.push({
+          threadId: state.threadId,
+          position,
+          occurredAt: state.lastViewed?.occurredAt ?? "1970-01-01T00:00:00.000Z",
+          deviceId: "",
+          eventId: "",
+        });
+      }
+    }
+  }
+
+  allPostRecords.sort(comparePostRecords);
+  const retainedPostRecords =
+    allPostRecords.length > maxGlobalPostPositions
+      ? allPostRecords.slice(-maxGlobalPostPositions)
+      : allPostRecords;
+
+  const retainedPostsByThread = new Map<string, Set<number>>();
+  for (const record of retainedPostRecords) {
+    let set = retainedPostsByThread.get(record.threadId);
+    if (set === undefined) {
+      set = new Set<number>();
+      retainedPostsByThread.set(record.threadId, set);
+    }
+    set.add(record.position);
+  }
+
+  const threads: SnapshotThreadState[] = [];
+  for (const state of states.values()) {
+    const postPositions = [
+      ...(retainedPostsByThread.get(state.threadId) ?? []),
+    ].sort((left, right) => left - right);
+    const hasFavorite =
+      state.favoriteEvent !== undefined &&
+      !state.favoriteEvent.cleared &&
+      state.favoriteLevel !== undefined;
+    const hasPosts = postPositions.length > 0;
+    const activityTimestamps: number[] = [];
+    if (state.lastViewed !== undefined) {
+      const ts = Date.parse(state.lastViewed.occurredAt);
+      if (!Number.isNaN(ts)) activityTimestamps.push(ts);
+    }
+    if (state.metadata !== undefined) {
+      const ts = Date.parse(state.metadata.occurredAt);
+      if (!Number.isNaN(ts)) activityTimestamps.push(ts);
+    }
+    const lastActivityAt =
+      activityTimestamps.length > 0
+        ? Math.max(...activityTimestamps)
+        : undefined;
+    const isRecent =
+      lastActivityAt !== undefined &&
+      createdAtMs - lastActivityAt < retentionPeriodMs;
+
+    if (!hasFavorite && !hasPosts && !isRecent) {
+      continue;
+    }
+
+    threads.push({
+      threadId: state.threadId,
+      ...(state.metadata === undefined ? {} : { metadata: state.metadata }),
+      ...(state.lastReadPosition === undefined
+        ? {}
+        : { lastReadPosition: state.lastReadPosition }),
+      ...(state.responseCount === undefined
+        ? {}
+        : { responseCount: state.responseCount }),
+      ...(state.lastViewed === undefined
+        ? {}
+        : { lastViewed: state.lastViewed }),
+      ...(state.favoriteEvent === undefined
+        ? {}
+        : { favorite: state.favoriteEvent }),
+      postPositions,
+    });
+  }
+
+  threads.sort((left, right) => left.threadId.localeCompare(right.threadId));
+
   return {
     v: EVENT_SCHEMA_VERSION,
     deviceId,
     revision,
     createdAt,
     coveredSegments: [...coveredSegments],
-    threads: [...states.values()]
-      .sort((left, right) => left.threadId.localeCompare(right.threadId))
-      .map((state) => ({
-        threadId: state.threadId,
-        ...(state.metadata === undefined ? {} : { metadata: state.metadata }),
-        ...(state.lastReadPosition === undefined
-          ? {}
-          : { lastReadPosition: state.lastReadPosition }),
-        ...(state.responseCount === undefined
-          ? {}
-          : { responseCount: state.responseCount }),
-        ...(state.lastViewed === undefined
-          ? {}
-          : { lastViewed: state.lastViewed }),
-        ...(state.favoriteEvent === undefined
-          ? {}
-          : { favorite: state.favoriteEvent }),
-        postPositions: [...state.postPositions],
-      })),
+    threads,
     filters: [...filters.values()]
       .sort(compareFilterStates)
       .map((filter) => ({
@@ -248,6 +335,15 @@ export function projectDetailedThreadStates(
     }
     for (const position of seed.postPositions) {
       state.postPositions.add(position);
+      if (!state.postRecords.has(position)) {
+        state.postRecords.set(position, {
+          threadId: seed.threadId,
+          position,
+          occurredAt: seed.lastViewed?.occurredAt ?? "1970-01-01T00:00:00.000Z",
+          deviceId: "",
+          eventId: "",
+        });
+      }
     }
     if (
       seed.favorite !== undefined &&
@@ -332,9 +428,24 @@ export function projectDetailedThreadStates(
           };
         }
         break;
-      case "thread.post.recorded":
+      case "thread.post.recorded": {
         state.postPositions.add(event.position);
+        const candidateRecord: ProjectedPostRecord = {
+          threadId: event.threadId,
+          position: event.position,
+          occurredAt: event.occurredAt,
+          deviceId: event.deviceId,
+          eventId: event.id,
+        };
+        const existingRecord = state.postRecords.get(event.position);
+        if (
+          existingRecord === undefined ||
+          comparePostRecords(existingRecord, candidateRecord) < 0
+        ) {
+          state.postRecords.set(event.position, candidateRecord);
+        }
         break;
+      }
     }
   }
 
@@ -368,6 +479,7 @@ export function projectDetailedThreadStates(
             ? {}
             : { favoriteEvent: state.favoriteEvent }),
           postPositions: [...state.postPositions].sort((left, right) => left - right),
+          postRecords: [...state.postRecords.values()],
         },
       ]),
   );
@@ -382,10 +494,24 @@ function getOrCreateState(
     state = {
       threadId,
       postPositions: new Set<number>(),
+      postRecords: new Map<number, ProjectedPostRecord>(),
     };
     states.set(threadId, state);
   }
   return state;
+}
+
+function comparePostRecords(
+  left: ProjectedPostRecord,
+  right: ProjectedPostRecord,
+): number {
+  return (
+    Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
+    compareOrdinal(left.deviceId, right.deviceId) ||
+    compareOrdinal(left.eventId, right.eventId) ||
+    compareOrdinal(left.threadId, right.threadId) ||
+    left.position - right.position
+  );
 }
 
 function compareFavoriteEvents(
