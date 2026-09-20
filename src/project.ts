@@ -5,6 +5,7 @@ import type {
   FavoriteSetEvent,
   SegmentCoverage,
   SnapshotFavorite,
+  SnapshotThreadMetadata,
   SnapshotThreadState,
   SnapshotViewed,
   SnapshotMute,
@@ -16,6 +17,7 @@ import type {
 } from "./types.js";
 
 export interface ProjectedThreadState extends ThreadState {
+  readonly metadata?: SnapshotThreadMetadata;
   readonly lastViewed?: SnapshotViewed;
   readonly favoriteEvent?: SnapshotFavorite;
 }
@@ -28,6 +30,7 @@ export interface ProjectedMuteState extends MuteEntry {
 
 interface MutableThreadState {
   threadId: string;
+  metadata?: SnapshotThreadMetadata;
   lastReadPosition?: number;
   responseCount?: number;
   lastViewed?: SnapshotViewed;
@@ -97,6 +100,7 @@ export function snapshotFromStates(
       .sort((left, right) => left.threadId.localeCompare(right.threadId))
       .map((state) => ({
         threadId: state.threadId,
+        ...(state.metadata === undefined ? {} : { metadata: state.metadata }),
         ...(state.lastReadPosition === undefined
           ? {}
           : { lastReadPosition: state.lastReadPosition }),
@@ -181,6 +185,9 @@ export function projectThreadStates(
       threadId,
       {
         threadId: state.threadId,
+        ...(state.metadata === undefined
+          ? {}
+          : { title: state.metadata.title, url: state.metadata.url }),
         ...(state.lastReadPosition === undefined
           ? {}
           : { lastReadPosition: state.lastReadPosition }),
@@ -207,6 +214,13 @@ export function projectDetailedThreadStates(
 
   for (const seed of seeds) {
     const state = getOrCreateState(mutableStates, seed.threadId);
+    if (
+      seed.metadata !== undefined &&
+      (state.metadata === undefined ||
+        compareMetadataEvents(state.metadata, seed.metadata) < 0)
+    ) {
+      state.metadata = seed.metadata;
+    }
     if (seed.lastReadPosition !== undefined) {
       state.lastReadPosition = Math.max(
         state.lastReadPosition ?? 0,
@@ -247,6 +261,20 @@ export function projectDetailedThreadStates(
     const state = getOrCreateState(mutableStates, event.threadId);
 
     switch (event.type) {
+      case "thread.metadata.updated":
+        if (
+          state.metadata === undefined ||
+          compareMetadataEvents(state.metadata, event) < 0
+        ) {
+          state.metadata = {
+            title: event.title,
+            url: event.url,
+            occurredAt: event.occurredAt,
+            deviceId: event.deviceId,
+            eventId: event.id,
+          };
+        }
+        break;
       case "thread.viewed":
         state.lastReadPosition = Math.max(
           state.lastReadPosition ?? 0,
@@ -311,6 +339,13 @@ export function projectDetailedThreadStates(
         threadId,
         {
           threadId,
+          ...(state.metadata === undefined
+            ? {}
+            : {
+                title: state.metadata.title,
+                url: state.metadata.url,
+                metadata: state.metadata,
+              }),
           ...(state.lastReadPosition === undefined
             ? {}
             : { lastReadPosition: state.lastReadPosition }),
@@ -350,6 +385,20 @@ function getOrCreateState(
 function compareFavoriteEvents(
   left: FavoriteSetEvent | FavoriteClearedEvent | SnapshotFavorite,
   right: FavoriteSetEvent | FavoriteClearedEvent | SnapshotFavorite,
+): number {
+  return (
+    Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
+    compareOrdinal(left.deviceId, right.deviceId) ||
+    compareOrdinal(
+      "id" in left ? left.id : left.eventId,
+      "id" in right ? right.id : right.eventId,
+    )
+  );
+}
+
+function compareMetadataEvents(
+  left: SnapshotThreadMetadata | { occurredAt: string; deviceId: string; id: string },
+  right: SnapshotThreadMetadata | { occurredAt: string; deviceId: string; id: string },
 ): number {
   return (
     Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||

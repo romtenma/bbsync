@@ -112,6 +112,16 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
   return [
     {
       v: 1,
+      id: `${deviceId}-metadata`,
+      deviceId,
+      occurredAt: "2026-09-20T00:00:00.000Z",
+      threadId: "thread-1",
+      type: "thread.metadata.updated",
+      title: "Thread title",
+      url: "https://example.com/thread/1",
+    },
+    {
+      v: 1,
       id: `${deviceId}-view`,
       deviceId,
       occurredAt: "2026-09-20T00:00:00.000Z",

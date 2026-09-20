@@ -47,6 +47,106 @@ test("projects bulletin-board state from JSONL events", async () => {
   }
 });
 
+test("syncs thread title and URL without changing the thread key", async () => {
+  const fixture = await createFixture();
+  try {
+    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:01:00Z");
+
+    const event = await desktop.setThreadMetadata(
+      "@5ch/software/1234567890",
+      "最初のタイトル",
+      "https://egg.5ch.net/test/read.cgi/software/1234567890/",
+    );
+    assert.equal(event.v, 1);
+    assert.equal(event.type, "thread.metadata.updated");
+    assert.equal(event.threadId, "@5ch/software/1234567890");
+
+    await desktop.synchronizeWith(mobile.storage);
+    assert.deepEqual(
+      await mobile.getThreadState("@5ch/software/1234567890"),
+      {
+        threadId: "@5ch/software/1234567890",
+        title: "最初のタイトル",
+        url: "https://egg.5ch.net/test/read.cgi/software/1234567890/",
+        postPositions: [],
+      },
+    );
+
+    await mobile.setThreadMetadata(
+      "@5ch/software/1234567890",
+      "更新後のタイトル",
+      "https://itest.5ch.net/test/read.cgi/software/1234567890/",
+    );
+    await desktop.synchronizeWith(mobile.storage);
+
+    const expected = {
+      threadId: "@5ch/software/1234567890",
+      title: "更新後のタイトル",
+      url: "https://itest.5ch.net/test/read.cgi/software/1234567890/",
+      postPositions: [],
+    };
+    assert.deepEqual(await desktop.getThreadState("@5ch/software/1234567890"), expected);
+    assert.deepEqual(await mobile.getThreadState("@5ch/software/1234567890"), expected);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("preserves thread metadata conflict information through compaction", async () => {
+  const fixture = await createFixture(1, 0);
+  try {
+    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:01:00Z");
+    const offline = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
+    await desktop.setThreadMetadata(
+      "thread-1",
+      "新しいタイトル",
+      "https://example.com/thread/1",
+    );
+    const snapshot = await desktop.compact();
+    assert.deepEqual(snapshot.threads[0]?.metadata, {
+      title: "新しいタイトル",
+      url: "https://example.com/thread/1",
+      occurredAt: "2026-09-20T00:01:00.000Z",
+      deviceId: "desktop",
+      eventId: "id-desktop-1",
+    });
+
+    await offline.setThreadMetadata(
+      "thread-1",
+      "古いタイトル",
+      "https://example.net/old-thread/1",
+    );
+    await desktop.synchronizeWith(offline.storage);
+
+    assert.deepEqual(await desktop.getThreadState("thread-1"), {
+      threadId: "thread-1",
+      title: "新しいタイトル",
+      url: "https://example.com/thread/1",
+      postPositions: [],
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("validates thread metadata", async () => {
+  const fixture = await createFixture();
+  try {
+    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    await assert.rejects(
+      () => sync.setThreadMetadata("thread-1", "", "https://example.com/thread/1"),
+      /title must be a non-empty string/,
+    );
+    await assert.rejects(
+      () => sync.setThreadMetadata("thread-1", "タイトル", "/thread/1"),
+      /url must be an absolute URL/,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("defaults an omitted favorite level to one", async () => {
   const fixture = await createFixture();
   try {

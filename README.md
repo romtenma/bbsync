@@ -1,6 +1,6 @@
 # bbsync
 
-掲示板クライアント間で、スレッドの閲覧位置、レス数、お気に入りレベル、書き込み位置を共有するためのNode.jsモジュールです。クライアント固有のデータ変換は各クライアント側のアダプターが担当し、このパッケージはJSONLの読み書き、状態の統合、ストレージ間同期を担当します。
+掲示板クライアント間で、スレッドのタイトル、遷移先URL、閲覧位置、レス数、お気に入りレベル、書き込み位置を共有するためのNode.jsモジュールです。クライアント固有のデータ変換は各クライアント側のアダプターが担当し、このパッケージはJSONLの読み書き、状態の統合、ストレージ間同期を担当します。
 
 現在はローカルファイルストレージを実装しています。将来のGoogle Driveストレージも同じ`EventStore`インターフェースで追加できます。
 
@@ -27,6 +27,11 @@ const sync = new BbsSync({
 });
 
 await sync.recordThreadView("@5ch/software/1234567890", 125);
+await sync.setThreadMetadata(
+  "@5ch/software/1234567890",
+  "ソフトウェア板のスレッド",
+  "https://egg.5ch.net/test/read.cgi/software/1234567890/",
+);
 await sync.recordResponseCount("@5ch/software/1234567890", 130);
 await sync.setFavorite("@5ch/software/1234567890", 3);
 await sync.clearFavorite("@5ch/software/1234567890");
@@ -47,7 +52,7 @@ const state = await sync.getThreadState("@5ch/software/1234567890");
 await sync.compact();
 ```
 
-`threadId`はこのモジュールにとって不透明な文字列です。URLやクライアント内部のキーをどのように正規化するかはアダプター側で決定します。
+`threadId`はこのモジュールにとって不透明な文字列です。タイトルやURLはキーに使いません。URLやクライアント内部のキーをどのように正規化して`threadId`にするかはアダプター側で決定します。
 
 サイトキーをURLから作る場合は、`normalizeSiteKey()`を使用できます。規定サイトは`@5ch`、`@bbspink`、`@open2ch`、`@machi`、`@shitaraba`へ正規化され、サブドメインも同じキーになります。未知サイトは正規化したホスト名（サブドメインを含む）になります。
 
@@ -87,6 +92,7 @@ bbsync-data/
 各行はバージョン付きイベントです。
 
 ```json
+{"v":1,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:40.000Z","threadId":"@5ch/software/1234567890","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1234567890/"}
 {"v":1,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"@5ch/software/1234567890","type":"thread.viewed","position":125}
 {"v":1,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"mute.set","scope":"@5ch/software","value":"ID:ABCDEFG","updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
 ```
@@ -94,6 +100,7 @@ bbsync-data/
 ## 統合規則
 
 - 閲覧位置: 最大の位置を採用
+- タイトル・URL: 一組として扱い、`occurredAt`が新しい更新を採用。同時刻の場合は端末IDとイベントIDで決定
 - 閲覧日時: `thread.viewed`の`occurredAt`が新しい日時を採用
 - レス数: 端末間で観測した最大値を採用
 - お気に入り: 1〜5のレベルで管理。省略時はレベル1。`occurredAt`が新しい操作を採用し、同時刻の場合は端末IDとイベントIDで決定

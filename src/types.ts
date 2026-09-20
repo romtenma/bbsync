@@ -23,8 +23,17 @@ export interface SnapshotViewed {
   readonly eventId: string;
 }
 
+export interface SnapshotThreadMetadata {
+  readonly title: string;
+  readonly url: string;
+  readonly occurredAt: string;
+  readonly deviceId: string;
+  readonly eventId: string;
+}
+
 export interface SnapshotThreadState {
   readonly threadId: string;
+  readonly metadata?: SnapshotThreadMetadata;
   readonly lastReadPosition?: number;
   readonly responseCount?: number;
   readonly lastViewed?: SnapshotViewed;
@@ -73,6 +82,13 @@ export interface ThreadViewedEvent extends BaseThreadEvent {
   readonly position: number;
 }
 
+export interface ThreadMetadataUpdatedEvent extends BaseThreadEvent {
+  readonly v: typeof EVENT_SCHEMA_VERSION;
+  readonly type: "thread.metadata.updated";
+  readonly title: string;
+  readonly url: string;
+}
+
 export interface ThreadResponseCountObservedEvent extends BaseThreadEvent {
   readonly type: "thread.response-count.observed";
   readonly responseCount: number;
@@ -108,6 +124,7 @@ export interface MuteClearedEvent extends BaseEvent {
 }
 
 export type SyncEvent =
+  | ThreadMetadataUpdatedEvent
   | ThreadViewedEvent
   | ThreadResponseCountObservedEvent
   | FavoriteSetEvent
@@ -127,6 +144,12 @@ interface BaseThreadEventInput extends BaseEventInput {
 export interface ThreadViewedInput extends BaseThreadEventInput {
   readonly type: "thread.viewed";
   readonly position: number;
+}
+
+export interface ThreadMetadataUpdatedInput extends BaseThreadEventInput {
+  readonly type: "thread.metadata.updated";
+  readonly title: string;
+  readonly url: string;
 }
 
 export interface ThreadResponseCountObservedInput extends BaseThreadEventInput {
@@ -164,6 +187,7 @@ export interface MuteClearedInput extends BaseEventInput {
 }
 
 export type SyncEventInput =
+  | ThreadMetadataUpdatedInput
   | ThreadViewedInput
   | ThreadResponseCountObservedInput
   | FavoriteSetInput
@@ -181,6 +205,8 @@ export interface MuteEntry {
 
 export interface ThreadState {
   readonly threadId: string;
+  readonly title?: string;
+  readonly url?: string;
   readonly lastReadPosition?: number;
   readonly responseCount?: number;
   readonly lastViewedAt?: string;

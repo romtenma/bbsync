@@ -1,12 +1,12 @@
 # bbsync 専用ブラウザ・アダプターイベント仕様 v1
 
-- 状態: Draft
+- 状態: Current
 - 仕様バージョン: `1`
 - 対象: 掲示板専用ブラウザと bbsync を接続するアダプター
 
 ## 1. 目的
 
-本仕様は、異なる専用ブラウザが閲覧状態、レス数、お気に入り、書き込み位置、ミュートを同じ意味で交換し、同じ入力から同じ状態へ収束するための共通イベントプロトコルを定義する。
+本仕様は、異なる専用ブラウザがスレッドのタイトル、遷移先URL、閲覧状態、レス数、お気に入り、書き込み位置、ミュートを同じ意味で交換し、同じ入力から同じ状態へ収束するための共通イベントプロトコルを定義する。
 
 アダプターは、ブラウザ固有のデータを本仕様の識別子とイベントへ変換し、同期後の射影状態をブラウザ固有のデータへ反映する。bbsync コアはイベントの永続化、重複排除、統合、ストレージ間コピーを担当する。
 
@@ -24,6 +24,7 @@ v1 が同期する状態は次のとおりである。
 
 | 状態 | イベント | 統合方式 |
 | --- | --- | --- |
+| スレッドタイトル・遷移先URL | `thread.metadata.updated` | `(occurredAt, deviceId, id)`の最新 |
 | 最終既読位置・最終閲覧日時 | `thread.viewed` | 位置は最大値、日時は最新イベント |
 | 観測済みレス数 | `thread.response-count.observed` | 最大値 |
 | お気に入りとレベル | `thread.favorite.set` / `thread.favorite.cleared` | 最終更新優先 |
@@ -234,14 +235,30 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 {"v":1,"id":"550e8400-e29b-41d4-a716-446655440005","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:00.000Z","threadId":"5ch/software/1750000000","type":"thread.post.recorded","position":126}
 ```
 
-### 7.6 `mute.set`
+### 7.6 `thread.metadata.updated`
+
+スレッドの表示用タイトルと遷移先URLを一組として記録する。タイトルやURLは`threadId`の主キーには使わない。
+
+| フィールド | 型 | 制約 |
+| --- | --- | --- |
+| `threadId` | string | 5.3節の共通キー |
+| `title` | string | 空でない表示用タイトル |
+| `url` | string | 空でない絶対URL |
+
+```json
+{"v":1,"id":"550e8400-e29b-41d4-a716-446655440008","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:30.000Z","threadId":"@5ch/software/1750000000","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1750000000/"}
+```
+
+アダプターはスレッドを開いたとき、またはタイトルもしくは遷移先URLの変化を検出したときにイベントを記録する。同じ値の高頻度通知は抑止してよい。URLがホスト移転などで変わっても、同じスレッドであれば`threadId`を変更してはならない。
+
+### 7.7 `mute.set`
 
 ミュート項目を設定する。
 
 | フィールド | 型 | 必須 | 制約・意味 |
 | --- | --- | --- | --- |
 | `scope` | string | Yes | 5.4節の共通キー |
-| `value` | string | Yes | 7.8節のミュート値 |
+| `value` | string | Yes | 7.9節のミュート値 |
 | `updatedAt` | string | Yes | このミュート項目の意味上の更新日時 |
 | `hitAt` | string または `null` | No | 条件がスレッド内で最後に検出された日時 |
 
@@ -253,7 +270,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 {"v":1,"id":"550e8400-e29b-41d4-a716-446655440006","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","type":"mute.set","scope":"5ch/software","value":"ID:ABCDEFG","updatedAt":"2026-09-20T01:28:00.000Z","hitAt":"2026-09-20T01:27:59.000Z"}
 ```
 
-### 7.7 `mute.cleared`
+### 7.8 `mute.cleared`
 
 `scope` と `value` が一致するミュート項目を解除する。解除も保持し、古いオフライン端末の設定を復活させない。
 
@@ -267,7 +284,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 {"v":1,"id":"550e8400-e29b-41d4-a716-446655440007","deviceId":"desktop-main","occurredAt":"2026-09-20T01:29:00.000Z","type":"mute.cleared","scope":"5ch/software","value":"ID:ABCDEFG","updatedAt":"2026-09-20T01:29:00.000Z"}
 ```
 
-### 7.8 ミュート値
+### 7.9 ミュート値
 
 bbsync コアは `value` の内容を解釈しない。相互運用するアダプターは、次の v1 接頭辞を使用する。
 
@@ -289,6 +306,7 @@ bbsync コアは `value` の内容を解釈しない。相互運用するアダ�
 
 | 射影フィールド | 統合規則 |
 | --- | --- |
+| `title`, `url` | 同じ`threadId`の`thread.metadata.updated`を`(occurredAt, deviceId, id)`で比較し、最大のイベントの組を採用 |
 | `lastReadPosition` | 同じ `threadId` の全 `thread.viewed.position` の最大値 |
 | `lastViewedAt` | `(occurredAt, deviceId, id)` が最大の `thread.viewed` の `occurredAt` |
 | `responseCount` | 同じ `threadId` の全 `responseCount` の最大値 |
@@ -296,6 +314,8 @@ bbsync コアは `value` の内容を解釈しない。相互運用するアダ�
 | `postPositions` | 全 `thread.post.recorded.position` の重複なし昇順集合 |
 
 最終閲覧日時と最終既読位置は独立して統合する。たとえば、位置100を読んだ古いイベントと、その後に位置80を再閲覧したイベントがある場合、`lastReadPosition` は100、`lastViewedAt` は後者の日時になる。
+
+タイトルとURLは常に同じイベントから取得する。スナップショットには値に加えて、そのイベントの`occurredAt`、`deviceId`、`eventId`を保存し、コンパクション後も古いオフライン端末の更新で上書きされないようにする。メタデータ未取得のスレッドでは`title`と`url`を省略する。
 
 ### 8.2 お気に入り
 
@@ -330,6 +350,7 @@ bbsync コアは `value` の内容を解釈しない。相互運用するアダ�
 
 | ブラウザ側の操作 | 発火するイベント |
 | --- | --- |
+| スレッドを開く、またはタイトル・遷移先URLを取得・更新 | `thread.metadata.updated` |
 | スレッドを開く、または既読位置が進む | `thread.viewed` |
 | サーバーからレス一覧を取得し件数が判明 | `thread.response-count.observed` |
 | お気に入りを追加、またはレベルを変更 | `thread.favorite.set` |
@@ -373,6 +394,7 @@ v1 はベクトル時計やサーバー時刻による補正を定義しない�
 
 | イベント | 推奨 API |
 | --- | --- |
+| `thread.metadata.updated` | `setThreadMetadata(threadId, title, url)` |
 | `thread.viewed` | `recordThreadView(threadId, position)` |
 | `thread.response-count.observed` | `recordResponseCount(threadId, responseCount)` |
 | `thread.favorite.set` | `setFavorite(threadId, level)` |
@@ -428,7 +450,7 @@ await adapter.applyProjectedState({ threads, mutes }, {
 - [ ] `deviceId` を永続化し、プロファイル複製時に再生成する。
 - [ ] 同じ 5ch URLから `@5ch/<board>/<thread>` の同じキーを生成する。
 - [ ] レス番号はフィルター後の表示位置ではなく元の番号を使う。
-- [ ] 全7イベントを正しい制約で発火する。
+- [ ] 全8イベントを正しい制約で発火する。
 - [ ] 同期反映からイベントを再発火しない。
 - [ ] 同じ射影を複数回適用しても結果が変わらない。
 - [ ] お気に入り解除とミュート解除を状態として保持する。

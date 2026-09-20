@@ -3,6 +3,7 @@ import {
   type FavoriteLevel,
   type SegmentRef,
   type SegmentCoverage,
+  type SnapshotThreadMetadata,
   type SnapshotViewed,
   type SnapshotMute,
   type StateSnapshot,
@@ -60,6 +61,9 @@ export function assertEvent(value: unknown): asserts value is SyncEvent {
   }
 
   switch (event.type) {
+    case "thread.metadata.updated":
+      assertThreadMetadata(event.title, event.url, "event");
+      break;
     case "thread.viewed":
       assertPosition(event.position, true);
       break;
@@ -150,6 +154,9 @@ function assertSnapshotThread(value: unknown): void {
   }
   const thread = value as Record<string, unknown>;
   assertThreadId(thread.threadId as string);
+  if (thread.metadata !== undefined) {
+    assertSnapshotThreadMetadata(thread.metadata);
+  }
   if (
     thread.lastReadPosition !== undefined &&
     (!Number.isSafeInteger(thread.lastReadPosition) || (thread.lastReadPosition as number) < 0)
@@ -195,6 +202,41 @@ function assertSnapshotThread(value: unknown): void {
     }
     assertSafeComponent(favorite.deviceId as string, "snapshot favorite.deviceId");
     assertSafeComponent(favorite.eventId as string, "snapshot favorite.eventId");
+  }
+}
+
+function assertSnapshotThreadMetadata(
+  value: unknown,
+): asserts value is SnapshotThreadMetadata {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("snapshot thread metadata must be an object");
+  }
+  const metadata = value as Record<string, unknown>;
+  assertThreadMetadata(metadata.title, metadata.url, "snapshot metadata");
+  assertDateTime(metadata.occurredAt, "snapshot metadata.occurredAt");
+  for (const field of ["deviceId", "eventId"] as const) {
+    if (typeof metadata[field] !== "string" || metadata[field].length === 0) {
+      throw new TypeError(`snapshot metadata.${field} must be a non-empty string`);
+    }
+    assertSafeComponent(metadata[field] as string, `snapshot metadata.${field}`);
+  }
+}
+
+export function assertThreadMetadata(
+  title: unknown,
+  url: unknown,
+  prefix = "thread metadata",
+): void {
+  if (typeof title !== "string" || title.length === 0) {
+    throw new TypeError(`${prefix}.title must be a non-empty string`);
+  }
+  if (typeof url !== "string" || url.length === 0) {
+    throw new TypeError(`${prefix}.url must be a non-empty string`);
+  }
+  try {
+    new URL(url);
+  } catch {
+    throw new TypeError(`${prefix}.url must be an absolute URL`);
   }
 }
 

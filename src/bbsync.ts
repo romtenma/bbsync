@@ -24,6 +24,7 @@ import {
   assertPosition,
   assertFavoriteLevel,
   assertSafeComponent,
+  assertThreadMetadata,
   assertThreadId,
 } from "./validation.js";
 
@@ -62,6 +63,17 @@ export class BbsSync {
   ): Promise<SyncEvent> {
     const [event] = await this.append([
       { type: "thread.viewed", threadId, position },
+    ]);
+    return event!;
+  }
+
+  async setThreadMetadata(
+    threadId: string,
+    title: string,
+    url: string,
+  ): Promise<SyncEvent> {
+    const [event] = await this.append([
+      { type: "thread.metadata.updated", threadId, title, url },
     ]);
     return event!;
   }
@@ -161,6 +173,9 @@ export class BbsSync {
         threadId,
         {
           threadId: state.threadId,
+          ...(state.metadata === undefined
+            ? {}
+            : { title: state.metadata.title, url: state.metadata.url }),
           ...(state.lastReadPosition === undefined
             ? {}
             : { lastReadPosition: state.lastReadPosition }),
@@ -274,6 +289,14 @@ export class BbsSync {
   ): SyncEvent {
     const threadBase = { ...base, threadId: input.threadId };
     switch (input.type) {
+      case "thread.metadata.updated":
+        assertThreadMetadata(input.title, input.url);
+        return {
+          ...threadBase,
+          type: input.type,
+          title: input.title,
+          url: input.url,
+        };
       case "thread.viewed":
         assertPosition(input.position, true);
         return { ...threadBase, type: input.type, position: input.position };
