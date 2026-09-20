@@ -1,12 +1,12 @@
-# bbsync 専用ブラウザ・アダプターイベント仕様 v1
+# bbsync 専用ブラウザ・アダプターイベント仕様 v2
 
 - 状態: Current
-- 仕様バージョン: `1`
+- 仕様バージョン: `2`
 - 対象: 掲示板専用ブラウザと bbsync を接続するアダプター
 
 ## 1. 目的
 
-本仕様は、異なる専用ブラウザがスレッドのタイトル、遷移先URL、閲覧状態、レス数、お気に入り、書き込み位置、ミュートを同じ意味で交換し、同じ入力から同じ状態へ収束するための共通イベントプロトコルを定義する。
+本仕様は、異なる専用ブラウザがスレッドのタイトル、遷移先URL、閲覧状態、レス数、お気に入り、書き込み位置、フィルターを同じ意味で交換し、同じ入力から同じ状態へ収束するための共通イベントプロトコルを定義する。
 
 アダプターは、ブラウザ固有のデータを本仕様の識別子とイベントへ変換し、同期後の射影状態をブラウザ固有のデータへ反映する。bbsync コアはイベントの永続化、重複排除、統合、ストレージ間コピーを担当する。
 
@@ -20,7 +20,7 @@
 
 ## 2. 適用範囲
 
-v1 が同期する状態は次のとおりである。
+v2 が同期する状態は次のとおりである。
 
 | 状態 | イベント | 統合方式 |
 | --- | --- | --- |
@@ -29,9 +29,9 @@ v1 が同期する状態は次のとおりである。
 | 観測済みレス数 | `thread.response-count.observed` | 最大値 |
 | お気に入りとレベル | `thread.favorite.set` / `thread.favorite.cleared` | 最終更新優先 |
 | 自分の書き込み位置 | `thread.post.recorded` | 集合の和 |
-| ミュート | `mute.set` / `mute.cleared` | 最終更新優先 |
+| フィルター | `filter.set` / `filter.cleared` | 最終更新優先 |
 
-スレッド本文、画像、Cookie、認証情報、板一覧、UI 設定は v1 の対象外である。
+スレッド本文、画像、Cookie、認証情報、板一覧、UI 設定は v2 の対象外である。
 
 ## 3. 用語
 
@@ -39,7 +39,7 @@ v1 が同期する状態は次のとおりである。
 - **端末**: 1つのブラウザープロファイルまたはアプリケーションインストール。1つの永続的な `deviceId` を持つ。
 - **イベント**: 端末で起きた状態変更を表す、不変な JSON オブジェクト。
 - **射影状態**: すべてのイベントとスナップショットを統合して得られる現在状態。
-- **サイトプロファイル**: URL、板、スレッド、ミュート値を共通キーへ正規化するサイト別規則。
+- **サイトプロファイル**: URL、板、スレッド、フィルター対象を共通キーへ正規化するサイト別規則。
 - **ローカル操作**: 利用者またはブラウザ自身が発生させた変更。
 - **同期反映**: bbsync から取得した射影状態をブラウザへ適用する変更。
 
@@ -96,7 +96,7 @@ UUID、またはアプリ名とUUIDを組み合わせた値を推奨する。表
 - 大文字小文字、Unicode 正規化、URL エンコード、旧ドメインやミラーの扱いはサイトプロファイルに従う。
 - 未知のサイトについて、アダプター独自のキーを既存の `site-key` として発行してはならない。未知のサイトは正規化したホスト名（サブドメインを含む）を `site-key` とする。
 
-v1 の規定サイトプロファイルは次のとおりである。ホスト名が一致する場合と、指定ホストのサブドメインである場合に同じキーへ正規化する。
+v2 の規定サイトプロファイルは次のとおりである。ホスト名が一致する場合と、指定ホストのサブドメインである場合に同じキーへ正規化する。
 
 | `site-key` | ドメイン |
 | --- | --- |
@@ -127,7 +127,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 ### 5.4 `scope`
 
-`scope` はミュートが属する範囲を表す。v1 では板単位とし、対応する `threadId` からスレッド部分を除いた次の形式を使用する。
+`scope` はフィルターが属する範囲を表す。v2 では板単位とし、対応する `threadId` からスレッド部分を除いた次の形式を使用する。
 
 ```text
 <site-key>/<board-key>
@@ -135,7 +135,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 例: `@5ch/software`
 
-`scope` と `value` の組が1つのミュート項目のキーになる。両方とも空文字列は禁止する。
+`scope`、`targetType`、`target` の組が1つのフィルター項目のキーになる。すべて空文字列は禁止する。
 
 ## 6. 共通イベント形式
 
@@ -145,7 +145,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 | フィールド | 型 | 必須 | 意味 |
 | --- | --- | --- | --- |
-| `v` | integer | Yes | スキーマバージョン。v1 では常に `1` |
+| `v` | integer | Yes | スキーマバージョン。v2 では常に `1` |
 | `id` | string | Yes | イベントID |
 | `deviceId` | string | Yes | 発生元端末ID |
 | `occurredAt` | string | Yes | 操作が発生した日時 |
@@ -155,7 +155,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 すべての整数は JavaScript の安全な整数範囲内でなければならない。`NaN`、`Infinity`、小数、数値を表す文字列は無効である。
 
-異なる言語の実装間でイベントを安定して複製できるよう、イベントは生成後に再構成せず、元のフィールドと値を保持する（MUST）。新規生成時のフィールド順は、共通フィールド、`threadId`、`type`、種別固有フィールドの順を推奨する。ミュートイベントは共通フィールド、`type`、`scope`、`value`、日時フィールドの順とする。
+異なる言語の実装間でイベントを安定して複製できるよう、イベントは生成後に再構成せず、元のフィールドと値を保持する（MUST）。新規生成時のフィールド順は、共通フィールド、`threadId`、`type`、種別固有フィールドの順を推奨する。フィルターイベントは共通フィールド、`type`、`scope`、`targetType`、`target`、`effect`、日時フィールドの順とする。
 
 ## 7. イベント種別
 
@@ -168,12 +168,12 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `threadId` | string | 5.3節の共通キー |
 | `position` | integer | `0` 以上 |
 
-`position` は表示行番号ではなく、サイト上のレス番号を使用する。あぼーん、ミュート、折りたたみなどで非表示のレスも元の番号体系に含める。`0` は既読レスなしを表す。
+`position` は表示行番号ではなく、サイト上のレス番号を使用する。あぼーん、フィルター、折りたたみなどで非表示のレスも元の番号体系に含める。`0` は既読レスなしを表す。
 
 アダプターは少なくとも、利用者がスレッドを明示的に開いたとき、および最終既読位置が進んだときにイベントを記録すべきである。同じ閲覧セッション中のスクロール通知は間引いてよいが、セッション終了時または短いデバウンス後に最新位置を記録する。
 
 ```json
-{"v":1,"id":"550e8400-e29b-41d4-a716-446655440001","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"5ch/software/1750000000","type":"thread.viewed","position":125}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440001","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"5ch/software/1750000000","type":"thread.viewed","position":125}
 ```
 
 ### 7.2 `thread.response-count.observed`
@@ -185,10 +185,10 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `threadId` | string | 5.3節の共通キー |
 | `responseCount` | integer | `0` 以上 |
 
-`responseCount` はフィルター適用後の表示件数ではなく、サイト上の番号体系で観測できたレス数とする。同期状態は最大値を保持するため、サイト側の削除などによる件数減少は v1 では伝播しない。
+`responseCount` はフィルター適用後の表示件数ではなく、サイト上の番号体系で観測できたレス数とする。同期状態は最大値を保持するため、サイト側の削除などによる件数減少は v2 では伝播しない。
 
 ```json
-{"v":1,"id":"550e8400-e29b-41d4-a716-446655440002","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","threadId":"5ch/software/1750000000","type":"thread.response-count.observed","responseCount":130}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440002","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","threadId":"5ch/software/1750000000","type":"thread.response-count.observed","responseCount":130}
 ```
 
 ### 7.3 `thread.favorite.set`
@@ -205,7 +205,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 入力 API で `level` を省略した場合は `1` になるが、永続化イベントでは必須である。
 
 ```json
-{"v":1,"id":"550e8400-e29b-41d4-a716-446655440003","deviceId":"desktop-main","occurredAt":"2026-09-20T01:25:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.set","level":3}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440003","deviceId":"desktop-main","occurredAt":"2026-09-20T01:25:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.set","level":3}
 ```
 
 ### 7.4 `thread.favorite.cleared`
@@ -217,7 +217,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `threadId` | string | 5.3節の共通キー |
 
 ```json
-{"v":1,"id":"550e8400-e29b-41d4-a716-446655440004","deviceId":"desktop-main","occurredAt":"2026-09-20T01:26:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.cleared"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440004","deviceId":"desktop-main","occurredAt":"2026-09-20T01:26:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.cleared"}
 ```
 
 ### 7.5 `thread.post.recorded`
@@ -229,10 +229,10 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `threadId` | string | 5.3節の共通キー |
 | `position` | integer | `1` 以上 |
 
-投稿要求時の予測番号ではなく、サーバー応答または再取得によって確定したレス番号を記録すべきである。v1 に書き込み位置を取り消すイベントはない。
+投稿要求時の予測番号ではなく、サーバー応答または再取得によって確定したレス番号を記録すべきである。v2 に書き込み位置を取り消すイベントはない。
 
 ```json
-{"v":1,"id":"550e8400-e29b-41d4-a716-446655440005","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:00.000Z","threadId":"5ch/software/1750000000","type":"thread.post.recorded","position":126}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440005","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:00.000Z","threadId":"5ch/software/1750000000","type":"thread.post.recorded","position":126}
 ```
 
 ### 7.6 `thread.metadata.updated`
@@ -246,57 +246,66 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `url` | string | 空でない絶対URL |
 
 ```json
-{"v":1,"id":"550e8400-e29b-41d4-a716-446655440008","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:30.000Z","threadId":"@5ch/software/1750000000","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1750000000/"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440008","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:30.000Z","threadId":"@5ch/software/1750000000","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1750000000/"}
 ```
 
 アダプターはスレッドを開いたとき、またはタイトルもしくは遷移先URLの変化を検出したときにイベントを記録する。同じ値の高頻度通知は抑止してよい。URLがホスト移転などで変わっても、同じスレッドであれば`threadId`を変更してはならない。
 
-### 7.7 `mute.set`
+### 7.7 `filter.set`
 
-ミュート項目を設定する。
+フィルターを設定する。フィルターは `scope`、`targetType`、`target` の組で識別し、`effect` で一致時の表示効果を指定する。
 
 | フィールド | 型 | 必須 | 制約・意味 |
 | --- | --- | --- | --- |
 | `scope` | string | Yes | 5.4節の共通キー |
-| `value` | string | Yes | 7.9節のミュート値 |
-| `updatedAt` | string | Yes | このミュート項目の意味上の更新日時 |
+| `targetType` | `ID`、`BBSSLIP`、`TEXT` | Yes | 対象の種類 |
+| `target` | string | Yes | 対象の文字列。空は禁止 |
+| `effect` | `HIDE`、`TRANSPARENT`、`HIGHLIGHT` | Yes | 一致時の表示効果 |
+| `updatedAt` | string | Yes | このフィルターの意味上の更新日時 |
 | `hitAt` | string または `null` | No | 条件がスレッド内で最後に検出された日時 |
 
-`updatedAt` は競合解決に使われる。通常は `occurredAt` と同じ値にする。既存データのインポートなど、元データに信頼できる更新日時がある場合はその値を使用してよい。
-
-`hitAt` は参考情報であり、競合解決には使われない。未検出または不明なら省略する。入力の `null` は永続化できるが、射影状態では省略と同じ意味として扱う。
+同じ `(scope, targetType, target)` に新しい `effect` を設定した場合は、同じフィルターの表示効果を更新する。`updatedAt` は競合解決に使われ、通常は `occurredAt` と同じ値にする。
 
 ```json
-{"v":1,"id":"550e8400-e29b-41d4-a716-446655440006","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","type":"mute.set","scope":"5ch/software","value":"ID:ABCDEFG","updatedAt":"2026-09-20T01:28:00.000Z","hitAt":"2026-09-20T01:27:59.000Z"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440006","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","type":"filter.set","scope":"5ch/software","targetType":"ID","target":"ABCDEFG","effect":"HIDE","updatedAt":"2026-09-20T01:28:00.000Z","hitAt":"2026-09-20T01:27:59.000Z"}
 ```
 
-### 7.8 `mute.cleared`
+### 7.8 `filter.cleared`
 
-`scope` と `value` が一致するミュート項目を解除する。解除も保持し、古いオフライン端末の設定を復活させない。
+`scope`、`targetType`、`target` が一致するフィルターを解除する。解除も保持し、古いオフライン端末の設定を復活させない。
 
 | フィールド | 型 | 制約 |
 | --- | --- | --- |
 | `scope` | string | 5.4節の共通キー |
-| `value` | string | 解除対象と完全一致 |
+| `targetType` | `ID`、`BBSSLIP`、`TEXT` | 解除対象の種類 |
+| `target` | string | 解除対象と完全一致 |
 | `updatedAt` | string | 意味上の更新日時 |
 
 ```json
-{"v":1,"id":"550e8400-e29b-41d4-a716-446655440007","deviceId":"desktop-main","occurredAt":"2026-09-20T01:29:00.000Z","type":"mute.cleared","scope":"5ch/software","value":"ID:ABCDEFG","updatedAt":"2026-09-20T01:29:00.000Z"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440007","deviceId":"desktop-main","occurredAt":"2026-09-20T01:29:00.000Z","type":"filter.cleared","scope":"5ch/software","targetType":"ID","target":"ABCDEFG","updatedAt":"2026-09-20T01:29:00.000Z"}
 ```
 
-### 7.9 ミュート値
+### 7.9 フィルター対象と表示効果
 
-bbsync コアは `value` の内容を解釈しない。相互運用するアダプターは、次の v1 接頭辞を使用する。
+`targetType` と `target` の組で、条件とする対象を表す。
 
-| 形式 | 意味 | 比較 |
+| `targetType` | 意味 | 比較 |
 | --- | --- | --- |
-| `ID:<id>` | 投稿者IDとの完全一致 | 大文字小文字を含めサイト表示値どおり |
-| `BBSSLIP:<slip>` | BBS_SLIP 表示値との完全一致 | サイト表示値どおり |
-| `TEXT:<text>` | 本文に含まれる固定文字列 | Unicode NFC、文字列一致 |
+| `ID` | 投稿者IDとの完全一致 | 大文字小文字を含めサイト表示値どおり |
+| `BBSSLIP` | BBS_SLIP 表示値との完全一致 | サイト表示値どおり |
+| `TEXT` | 本文に含まれる固定文字列 | Unicode NFC、文字列一致 |
 
-`<...>` は空にしてはならない。先頭と末尾の空白が意味を持つ場合を除き、UI 入力由来の不要な空白を除去する。正規表現、名前、トリップ、複合条件などを追加するときは、アダプター独自形式を同じ標準接頭辞で発行せず、本仕様に意味と正規化規則を追加する。
+`effect` は次のいずれかとする。
 
-対応していない種類を受信したアダプターは、その値をローカルで適用しなくてもよい。ただし、利用者が変更していない値を別形式へ変換したり、解除イベントを発行したりしてはならない。
+| `effect` | 意味 |
+| --- | --- |
+| `HIDE` | 完全に非表示 |
+| `TRANSPARENT` | 透明または目立たない表示 |
+| `HIGHLIGHT` | 強調表示 |
+
+### 7.10 `effect` の解釈
+
+`effect` の具体的な色、透明度、アニメーションなどはクライアントが決定する。ただし、`HIDE` は対象を通常の表示対象から除外し、`HIGHLIGHT` は対象を識別できる強調表示にしなければならない。未対応の `targetType` または `effect` を受信したアダプターは、そのフィルターをローカルで適用しなくてもよい。
 
 ## 8. 状態の統合規則
 
@@ -327,15 +336,15 @@ bbsync コアは `value` の内容を解釈しない。相互運用するアダ�
 
 同時刻でも全実装が同じ結果を選べるよう、`deviceId` と `id` をタイブレークに使う。`set` と `cleared` の種類そのものに優先度はない。
 
-### 8.3 ミュート
+### 8.3 フィルター
 
-同じ `(scope, value)` の `mute.set` と `mute.cleared` を、次のキーで昇順比較し、最大のイベントを採用する。
+同じ `(scope, targetType, target)` の `filter.set` と `filter.cleared` を、次のキーで昇順比較し、最大のイベントを採用する。
 
 ```text
 (updatedAt の時刻, deviceId の辞書順, id の辞書順)
 ```
 
-勝ったイベントが `mute.set` なら有効、`mute.cleared` なら解除済みとなる。解除済み項目は通常のミュート一覧には返さないが、競合解決情報として保持する。
+勝ったイベントが `filter.set` なら有効、`filter.cleared` なら解除済みとなる。解除済み項目は通常のフィルター一覧には返さないが、競合解決情報として保持する。
 
 ### 8.4 重複と衝突
 
@@ -356,30 +365,30 @@ bbsync コアは `value` の内容を解釈しない。相互運用するアダ�
 | お気に入りを追加、またはレベルを変更 | `thread.favorite.set` |
 | お気に入りを解除 | `thread.favorite.cleared` |
 | 投稿したレス番号が確定 | `thread.post.recorded` |
-| ミュートを追加、または同じキーを更新 | `mute.set` |
-| ミュートを解除 | `mute.cleared` |
+| フィルターを追加、または同じキーを更新 | `filter.set` |
+| フィルターを解除 | `filter.cleared` |
 
-同一値の高頻度通知はデバウンスまたは重複抑止してよい。ただし、お気に入りとミュートの解除を「現在一覧に存在しない」という理由で省略してはならない。
+同一値の高頻度通知はデバウンスまたは重複抑止してよい。ただし、お気に入りとフィルターの解除を「現在一覧に存在しない」という理由で省略してはならない。
 
 ### 9.2 射影状態の反映
 
-アダプターは同期後、`getStates()` と `getMutes()` に相当する射影結果を取得してブラウザへ反映する。
+アダプターは同期後、`getStates()` と `getFilters()` に相当する射影結果を取得してブラウザへ反映する。
 
 - 既読位置、レス数、書き込み位置はブラウザ固有の表示番号ではなくサイト上のレス番号へ変換する。
 - お気に入りは解除状態も含め、最後に適用した射影との差分を反映する。
-- ミュートはアダプターが対応する値だけを動作へ反映してよい。
-- 対応できないレベルやミュート値があっても、同期データ自体を削除または上書きしない。
+- フィルターはアダプターが対応する対象種別と表示効果だけを動作へ反映してよい。
+- 対応できないレベルやフィルターがあっても、同期データ自体を削除または上書きしない。
 - 反映に失敗した項目は記録し、他の正常な項目の反映を可能な範囲で継続すべきである。
 
 ### 9.3 初回導入
 
 既存ブラウザーデータを初回に取り込む場合、アダプターは正規化後の現在値を1回だけイベント化する。再起動のたびに全件を再インポートしてはならない。インポート完了をアダプター側で永続的に記録する。
 
-元データに更新日時がないお気に入りはインポート時刻を `occurredAt` とする。ミュートの更新日時が不明な場合も、インポート時刻を `updatedAt` とする。これらの時刻は既存の別端末状態を上書きし得るため、初回同期でリモート状態を取得してからインポートすることを推奨する。
+元データに更新日時がないお気に入りはインポート時刻を `occurredAt` とする。フィルターの更新日時が不明な場合も、インポート時刻を `updatedAt` とする。これらの時刻は既存の別端末状態を上書きし得るため、初回同期でリモート状態を取得してからインポートすることを推奨する。
 
 ## 10. 時計と順序
 
-閲覧位置、レス数、書き込み位置は単調な統合のため時計ずれの影響を受けない。お気に入り、ミュート、最終閲覧日時は端末時計に依存する。
+閲覧位置、レス数、書き込み位置は単調な統合のため時計ずれの影響を受けない。お気に入り、フィルター、最終閲覧日時は端末時計に依存する。
 
 アダプターは次を満たすべきである。
 
@@ -388,7 +397,7 @@ bbsync コアは `value` の内容を解釈しない。相互運用するアダ�
 - 外部データの日時が明らかに未来である場合、無条件に採用せず診断情報を残す。
 - 受信イベントの時刻を書き換えない。
 
-v1 はベクトル時計やサーバー時刻による補正を定義しない。
+v2 はベクトル時計やサーバー時刻による補正を定義しない。
 
 ## 11. bbsync API との対応
 
@@ -400,8 +409,8 @@ v1 はベクトル時計やサーバー時刻による補正を定義しない�
 | `thread.favorite.set` | `setFavorite(threadId, level)` |
 | `thread.favorite.cleared` | `clearFavorite(threadId)` |
 | `thread.post.recorded` | `recordPost(threadId, position)` |
-| `mute.set` | `setMute(scope, value, options)` |
-| `mute.cleared` | `clearMute(scope, value, options)` |
+| `filter.set` | `setFilter(scope, targetType, target, effect, options)` |
+| `filter.cleared` | `clearFilter(scope, targetType, target, options)` |
 
 履歴日時を明示する初回インポートや複数イベントの一括追加には `append(inputs)` を使用する。永続化済みイベントの `v`、`id`、`deviceId` はコアが付与する。
 
@@ -411,9 +420,9 @@ v1 はベクトル時計やサーバー時刻による補正を定義しない�
 await sync.synchronizeWith(remoteStore);
 
 const threads = await sync.getStates();
-const mutes = await sync.getMutes();
+const filters = await sync.getFilters();
 
-await adapter.applyProjectedState({ threads, mutes }, {
+await adapter.applyProjectedState({ threads, filters }, {
   suppressOutboundEvents: true,
 });
 ```
@@ -437,11 +446,11 @@ await adapter.applyProjectedState({ threads, mutes }, {
 
 ## 13. バージョンと拡張
 
-- v1 のイベントは `v: 1` を必須とする。
+- v2 のイベントは `v: 2` を必須とする。
 - 受信側は未対応のバージョンまたはイベント種別を黙って解釈してはならない。
 - 既存フィールドの意味、型、統合規則を変える変更は新しい `v` を必要とする。
 - 新しいイベント種別を追加するときは、古い実装がセグメント全体を読めなくなることを前提に、対応バージョンと移行手順を同時に定義する。
-- サイトプロファイルまたはミュート値の追加は、既存の意味を変えず識別子衝突がなければ仕様文書の後方互換な追加としてよい。
+- サイトプロファイルまたはフィルター対象の追加は、既存の意味を変えず識別子衝突がなければ仕様文書の後方互換な追加としてよい。
 
 ## 14. 適合チェックリスト
 
@@ -453,8 +462,8 @@ await adapter.applyProjectedState({ threads, mutes }, {
 - [ ] 全8イベントを正しい制約で発火する。
 - [ ] 同期反映からイベントを再発火しない。
 - [ ] 同じ射影を複数回適用しても結果が変わらない。
-- [ ] お気に入り解除とミュート解除を状態として保持する。
-- [ ] 未対応のレベルやミュート値を勝手に変換・解除しない。
+- [ ] お気に入り解除とフィルター解除を状態として保持する。
+- [ ] 未対応のレベルやフィルターを勝手に変換・解除しない。
 - [ ] UTC の RFC 3339 日時を生成する。
 - [ ] オフラインの両端末で更新後、順不同で同期しても同じ射影状態になる。
 - [ ] イベントID衝突、分岐セグメント、未対応バージョンを利用者へ報告する。
@@ -482,8 +491,8 @@ await adapter.applyProjectedState({ threads, mutes }, {
 次のお気に入りイベントがある場合、時刻が新しい解除が勝つ。
 
 ```jsonl
-{"v":1,"id":"a-set","deviceId":"desktop","occurredAt":"2026-09-20T01:00:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.set","level":5}
-{"v":1,"id":"b-clear","deviceId":"mobile","occurredAt":"2026-09-20T01:01:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.cleared"}
+{"v":2,"id":"a-set","deviceId":"desktop","occurredAt":"2026-09-20T01:00:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.set","level":5}
+{"v":2,"id":"b-clear","deviceId":"mobile","occurredAt":"2026-09-20T01:01:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.cleared"}
 ```
 
 結果には `favoriteLevel` が存在しない。イベントを逆順に受信しても結果は同じである。

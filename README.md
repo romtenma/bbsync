@@ -4,7 +4,7 @@
 
 現在はローカルファイルストレージを実装しています。将来のGoogle Driveストレージも同じ`EventStore`インターフェースで追加できます。
 
-専用ブラウザのアダプターを実装する場合は、識別子の正規化、イベントの発火条件、同期状態の反映方法を定めた[アダプターイベント仕様 v1](docs/adapter-event-protocol-v1.md)を参照してください。
+専用ブラウザのアダプターを実装する場合は、識別子の正規化、イベントの発火条件、同期状態の反映方法を定めた[アダプターイベント仕様 v2](docs/adapter-event-protocol-v2.md)を参照してください。
 
 ## インストール
 
@@ -37,14 +37,14 @@ await sync.setFavorite("@5ch/software/1234567890", 3);
 await sync.clearFavorite("@5ch/software/1234567890");
 await sync.recordPost("@5ch/software/1234567890", 126);
 
-// ミュート値はbbsyncでは解釈せず、scopeとともに同期する
-await sync.setMute("@5ch/software", "ID:ABCDEFG");
-await sync.setMute("@5ch/software", "BBSSLIP:xxxx-yyyy", {
+// フィルターは対象種別・対象文字列・表示効果を分けて同期する
+await sync.setFilter("@5ch/software", "ID", "ABCDEFG", "HIDE");
+await sync.setFilter("@5ch/software", "BBSSLIP", "xxxx-yyyy", "TRANSPARENT", {
   hitAt: "2026-09-20T01:22:00.000Z",
 });
-await sync.setMute("@5ch/software", "TEXT:NGワード");
-const mutes = await sync.getMutes("@5ch/software");
-await sync.clearMute("@5ch/software", "ID:ABCDEFG");
+await sync.setFilter("@5ch/software", "TEXT", "NGワード", "HIGHLIGHT");
+const filters = await sync.getFilters("@5ch/software");
+await sync.clearFilter("@5ch/software", "ID", "ABCDEFG");
 
 const state = await sync.getThreadState("@5ch/software/1234567890");
 
@@ -65,9 +65,9 @@ normalizeSiteKey("https://sub.testtest.net/board/");
 // "sub.testtest.net"
 ```
 
-ミュートも同様に、`scope`と`value`を不透明な文字列として保存します。`scope`には`@5ch/software`のようなサイト・板キーを指定します。`value`の`ID:`、`BBSSLIP:`、`TEXT:`などの形式や、端末ごとにどの種類を適用するかはクライアント側で決定し、bbsyncは解釈しません。
+フィルターは、`scope`、`targetType`、`target`の組で対象を識別し、`effect`で一致時の表示効果を指定します。`targetType`は`ID`、`BBSSLIP`、`TEXT`のいずれか、`effect`は`HIDE`、`TRANSPARENT`、`HIGHLIGHT`のいずれかです。`scope`には`@5ch/software`のようなサイト・板キーを指定します。
 
-ミュート情報には必須の`updatedAt`と、条件がスレッド内に現れた日時を表す任意の`hitAt`があります。`updatedAt`を省略した場合はローカル時計から自動設定されます。解除も同期され、古いオフライン端末の更新によって復活しないように扱われます。
+フィルター情報には必須の`updatedAt`と、条件がスレッド内に現れた日時を表す任意の`hitAt`があります。`updatedAt`を省略した場合はローカル時計から自動設定されます。解除も同期され、古いオフライン端末の更新によって復活しないように扱われます。
 
 ## 同期
 
@@ -92,9 +92,9 @@ bbsync-data/
 各行はバージョン付きイベントです。
 
 ```json
-{"v":1,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:40.000Z","threadId":"@5ch/software/1234567890","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1234567890/"}
-{"v":1,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"@5ch/software/1234567890","type":"thread.viewed","position":125}
-{"v":1,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"mute.set","scope":"@5ch/software","value":"ID:ABCDEFG","updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
+{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:40.000Z","threadId":"@5ch/software/1234567890","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1234567890/"}
+{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"@5ch/software/1234567890","type":"thread.viewed","position":125}
+{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"filter.set","scope":"@5ch/software","targetType":"ID","target":"ABCDEFG","effect":"HIDE","updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
 ```
 
 ## 統合規則
@@ -107,11 +107,11 @@ bbsync-data/
 - 書き込み位置: 全端末の位置を重複なしで統合
 - イベント: イベントIDで重複排除。同じIDで内容が異なる場合はエラー
 - セグメント: `maxEventsPerSegment`件で次のファイルへローテーション
-- ミュート: `scope`と`value`の組をキーに、`updatedAt`が新しい状態を採用
-- スナップショット: 現在状態、お気に入り、ミュートの最終更新情報を端末別に保存
+- フィルター: `scope`、`targetType`、`target`の組をキーに、`updatedAt`が新しい状態を採用。`effect`は対象の表示効果
+- スナップショット: 現在状態、お気に入り、フィルターの最終更新情報を端末別に保存
 
 `clearFavorite()`はお気に入り解除を記録します。解除後に古い端末のレベル設定が復活しないよう、解除も最終更新情報としてスナップショットへ保存されます。
-`clearMute()`も同様に解除情報を保存します。
+`clearFilter()`も同様に解除情報を保存します。
 
 セグメントは追記方向にだけ更新できます。同じセグメントの両側が異なる内容へ分岐した場合は、データを暗黙に選ばず同期エラーにします。1つの`deviceId`に対する書き込み元は常に1端末に限定してください。
 

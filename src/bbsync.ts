@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   readProjectedStates,
-  readProjectedMutes,
+  readProjectedFilters,
   snapshotFromStates,
 } from "./project.js";
 import type { EventStore } from "./store.js";
@@ -16,11 +16,12 @@ import {
   type SegmentCoverage,
   type StateSnapshot,
   type ThreadState,
-  type MuteEntry,
+  type FilterEntry,
 } from "./types.js";
 import {
   assertDateTime,
-  assertMuteKey,
+  assertFilterKey,
+  assertFilterEffect,
   assertPosition,
   assertFavoriteLevel,
   assertSafeComponent,
@@ -109,60 +110,71 @@ export class BbsSync {
     return event!;
   }
 
-  async addMute(
+  async addFilter(
     scope: string,
-    value: string,
+    targetType: "ID" | "BBSSLIP" | "TEXT",
+    target: string,
+    effect: "HIDE" | "TRANSPARENT" | "HIGHLIGHT",
     options: { readonly updatedAt?: string; readonly hitAt?: string | null } = {},
   ): Promise<SyncEvent> {
     const [event] = await this.append([{
-      type: "mute.set",
+      type: "filter.set",
       scope,
-      value,
+      targetType,
+      target,
+      effect,
       ...(options.updatedAt === undefined ? {} : { updatedAt: options.updatedAt }),
       ...(options.hitAt === undefined ? {} : { hitAt: options.hitAt }),
     }]);
     return event!;
   }
 
-  async setMute(
+  async setFilter(
     scope: string,
-    value: string,
+    targetType: "ID" | "BBSSLIP" | "TEXT",
+    target: string,
+    effect: "HIDE" | "TRANSPARENT" | "HIGHLIGHT",
     options: { readonly updatedAt?: string; readonly hitAt?: string | null } = {},
   ): Promise<SyncEvent> {
-    return this.addMute(scope, value, options);
+    return this.addFilter(scope, targetType, target, effect, options);
   }
 
-  async removeMute(
+  async removeFilter(
     scope: string,
-    value: string,
+    targetType: "ID" | "BBSSLIP" | "TEXT",
+    target: string,
     options: { readonly updatedAt?: string } = {},
   ): Promise<SyncEvent> {
     const [event] = await this.append([{
-      type: "mute.cleared",
+      type: "filter.cleared",
       scope,
-      value,
+      targetType,
+      target,
       ...(options.updatedAt === undefined ? {} : { updatedAt: options.updatedAt }),
     }]);
     return event!;
   }
 
-  async clearMute(
+  async clearFilter(
     scope: string,
-    value: string,
+    targetType: "ID" | "BBSSLIP" | "TEXT",
+    target: string,
     options: { readonly updatedAt?: string } = {},
   ): Promise<SyncEvent> {
-    return this.removeMute(scope, value, options);
+    return this.removeFilter(scope, targetType, target, options);
   }
 
-  async getMutes(scope?: string): Promise<readonly MuteEntry[]> {
-    const projected = await readProjectedMutes(this.storage);
+  async getFilters(scope?: string): Promise<readonly FilterEntry[]> {
+    const projected = await readProjectedFilters(this.storage);
     return [...projected.values()]
-      .filter((mute) => !mute.cleared && (scope === undefined || mute.scope === scope))
-      .map((mute) => ({
-        scope: mute.scope,
-        value: mute.value,
-        updatedAt: mute.updatedAt,
-        ...(mute.hitAt === undefined ? {} : { hitAt: mute.hitAt }),
+      .filter((filter) => !filter.cleared && (scope === undefined || filter.scope === scope))
+      .map((filter) => ({
+        scope: filter.scope,
+        targetType: filter.targetType,
+        target: filter.target,
+        effect: filter.effect,
+        updatedAt: filter.updatedAt,
+        ...(filter.hitAt === undefined ? {} : { hitAt: filter.hitAt }),
       }));
   }
 
@@ -205,7 +217,7 @@ export class BbsSync {
 
   async compact(): Promise<StateSnapshot> {
     const states = await readProjectedStates(this.storage);
-    const mutes = await readProjectedMutes(this.storage);
+    const filters = await readProjectedFilters(this.storage);
     const previous = await this.storage.readSnapshot(this.deviceId);
     const coveredSegments: SegmentCoverage[] = [];
     for (const ref of await this.storage.listSegments()) {
@@ -221,7 +233,7 @@ export class BbsSync {
       this.clock().toISOString(),
       coveredSegments,
       states,
-      mutes,
+      filters,
     );
     await this.storage.writeSnapshot(snapshot);
     await this.storage.pruneSegments(snapshot);
@@ -244,8 +256,9 @@ export class BbsSync {
     };
 
     switch (input.type) {
-      case "mute.set": {
-        assertMuteKey(input.scope, input.value);
+      case "filter.set": {
+        assertFilterKey(input.scope, input.targetType, input.target);
+        assertFilterEffect(input.effect);
         const updatedAt = input.updatedAt ?? occurredAt;
         assertDateTime(updatedAt, "updatedAt");
         if (input.hitAt !== undefined && input.hitAt !== null) {
@@ -255,20 +268,23 @@ export class BbsSync {
           ...base,
           type: input.type,
           scope: input.scope,
-          value: input.value,
+          targetType: input.targetType,
+          target: input.target,
+          effect: input.effect,
           updatedAt,
           ...(input.hitAt === undefined ? {} : { hitAt: input.hitAt }),
         };
       }
-      case "mute.cleared": {
-        assertMuteKey(input.scope, input.value);
+      case "filter.cleared": {
+        assertFilterKey(input.scope, input.targetType, input.target);
         const updatedAt = input.updatedAt ?? occurredAt;
         assertDateTime(updatedAt, "updatedAt");
         return {
           ...base,
           type: input.type,
           scope: input.scope,
-          value: input.value,
+          targetType: input.targetType,
+          target: input.target,
           updatedAt,
         };
       }
@@ -285,7 +301,7 @@ export class BbsSync {
       readonly deviceId: string;
       readonly occurredAt: string;
     },
-    input: Exclude<SyncEventInput, { type: "mute.set" | "mute.cleared" }>,
+    input: Exclude<SyncEventInput, { type: "filter.set" | "filter.cleared" }>,
   ): SyncEvent {
     const threadBase = { ...base, threadId: input.threadId };
     switch (input.type) {

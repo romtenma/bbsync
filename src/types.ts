@@ -1,4 +1,4 @@
-export const EVENT_SCHEMA_VERSION = 1 as const;
+export const EVENT_SCHEMA_VERSION = 2 as const;
 
 export type EventSchemaVersion = typeof EVENT_SCHEMA_VERSION;
 
@@ -41,9 +41,14 @@ export interface SnapshotThreadState {
   readonly postPositions: readonly number[];
 }
 
-export interface SnapshotMute {
+export type FilterTargetType = "ID" | "BBSSLIP" | "TEXT";
+export type FilterEffect = "HIDE" | "TRANSPARENT" | "HIGHLIGHT";
+
+export interface SnapshotFilter {
   readonly scope: string;
-  readonly value: string;
+  readonly targetType: FilterTargetType;
+  readonly target: string;
+  readonly effect: FilterEffect;
   readonly updatedAt: string;
   readonly hitAt?: string;
   readonly cleared: boolean;
@@ -63,7 +68,7 @@ export interface StateSnapshot {
   readonly createdAt: string;
   readonly coveredSegments: readonly SegmentCoverage[];
   readonly threads: readonly SnapshotThreadState[];
-  readonly mutes: readonly SnapshotMute[];
+  readonly filters: readonly SnapshotFilter[];
 }
 
 interface BaseEvent {
@@ -108,18 +113,21 @@ export interface PostRecordedEvent extends BaseThreadEvent {
   readonly position: number;
 }
 
-export interface MuteSetEvent extends BaseEvent {
-  readonly type: "mute.set";
+export interface FilterSetEvent extends BaseEvent {
+  readonly type: "filter.set";
   readonly scope: string;
-  readonly value: string;
+  readonly targetType: FilterTargetType;
+  readonly target: string;
+  readonly effect: FilterEffect;
   readonly updatedAt: string;
   readonly hitAt?: string | null;
 }
 
-export interface MuteClearedEvent extends BaseEvent {
-  readonly type: "mute.cleared";
+export interface FilterClearedEvent extends BaseEvent {
+  readonly type: "filter.cleared";
   readonly scope: string;
-  readonly value: string;
+  readonly targetType: FilterTargetType;
+  readonly target: string;
   readonly updatedAt: string;
 }
 
@@ -130,8 +138,8 @@ export type SyncEvent =
   | FavoriteSetEvent
   | FavoriteClearedEvent
   | PostRecordedEvent
-  | MuteSetEvent
-  | MuteClearedEvent;
+  | FilterSetEvent
+  | FilterClearedEvent;
 
 interface BaseEventInput {
   readonly occurredAt?: string;
@@ -171,18 +179,21 @@ export interface PostRecordedInput extends BaseThreadEventInput {
   readonly position: number;
 }
 
-export interface MuteSetInput extends BaseEventInput {
-  readonly type: "mute.set";
+export interface FilterSetInput extends BaseEventInput {
+  readonly type: "filter.set";
   readonly scope: string;
-  readonly value: string;
+  readonly targetType: FilterTargetType;
+  readonly target: string;
+  readonly effect: FilterEffect;
   readonly updatedAt?: string;
   readonly hitAt?: string | null;
 }
 
-export interface MuteClearedInput extends BaseEventInput {
-  readonly type: "mute.cleared";
+export interface FilterClearedInput extends BaseEventInput {
+  readonly type: "filter.cleared";
   readonly scope: string;
-  readonly value: string;
+  readonly targetType: FilterTargetType;
+  readonly target: string;
   readonly updatedAt?: string;
 }
 
@@ -193,12 +204,14 @@ export type SyncEventInput =
   | FavoriteSetInput
   | FavoriteClearedInput
   | PostRecordedInput
-  | MuteSetInput
-  | MuteClearedInput;
+  | FilterSetInput
+  | FilterClearedInput;
 
-export interface MuteEntry {
+export interface FilterEntry {
   readonly scope: string;
-  readonly value: string;
+  readonly targetType: FilterTargetType;
+  readonly target: string;
+  readonly effect: FilterEffect;
   readonly updatedAt: string;
   readonly hitAt?: string;
 }

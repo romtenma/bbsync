@@ -5,7 +5,7 @@ import {
   type SegmentCoverage,
   type SnapshotThreadMetadata,
   type SnapshotViewed,
-  type SnapshotMute,
+  type SnapshotFilter,
   type StateSnapshot,
   type SyncEvent,
 } from "./types.js";
@@ -48,14 +48,17 @@ export function assertEvent(value: unknown): asserts value is SyncEvent {
     throw new TypeError("event.occurredAt must be a valid date-time string");
   }
 
-  if (event.type !== "mute.set" && event.type !== "mute.cleared") {
+  if (event.type !== "filter.set" && event.type !== "filter.cleared") {
     if (typeof event.threadId !== "string" || event.threadId.length === 0) {
       throw new TypeError("event.threadId must be a non-empty string");
     }
   } else {
-    assertMuteKey(event.scope, event.value);
+    assertFilterKey(event.scope, event.targetType, event.target);
+    if (event.type === "filter.set") {
+      assertFilterEffect(event.effect);
+    }
     assertDateTime(event.updatedAt, "event.updatedAt");
-    if (event.type === "mute.set" && event.hitAt !== undefined && event.hitAt !== null) {
+    if (event.type === "filter.set" && event.hitAt !== undefined && event.hitAt !== null) {
       assertDateTime(event.hitAt, "event.hitAt");
     }
   }
@@ -78,8 +81,8 @@ export function assertEvent(value: unknown): asserts value is SyncEvent {
     case "thread.post.recorded":
       assertPosition(event.position, false);
       break;
-    case "mute.set":
-    case "mute.cleared":
+    case "filter.set":
+    case "filter.cleared":
       break;
     default:
       throw new TypeError(`unsupported event type: ${String(event.type)}`);
@@ -129,11 +132,11 @@ export function assertSnapshot(value: unknown): asserts value is StateSnapshot {
   for (const thread of snapshot.threads) {
     assertSnapshotThread(thread);
   }
-  if (!Array.isArray(snapshot.mutes)) {
-    throw new TypeError("snapshot.mutes must be an array");
+  if (!Array.isArray(snapshot.filters)) {
+    throw new TypeError("snapshot.filters must be an array");
   }
-  for (const mute of snapshot.mutes) {
-    assertSnapshotMute(mute);
+  for (const filter of snapshot.filters) {
+    assertSnapshotFilter(filter);
   }
 }
 
@@ -256,33 +259,47 @@ function assertSnapshotViewed(value: unknown): asserts value is SnapshotViewed {
   }
 }
 
-function assertSnapshotMute(value: unknown): asserts value is SnapshotMute {
+function assertSnapshotFilter(value: unknown): void {
   if (typeof value !== "object" || value === null) {
-    throw new TypeError("snapshot mute must be an object");
+    throw new TypeError("snapshot filter must be an object");
   }
-  const mute = value as Record<string, unknown>;
-  assertMuteKey(mute.scope, mute.value);
-  assertDateTime(mute.updatedAt, "snapshot mute.updatedAt");
-  if (mute.hitAt !== undefined) {
-    assertDateTime(mute.hitAt, "snapshot mute.hitAt");
+  const filter = value as Record<string, unknown>;
+  assertFilterKey(filter.scope, filter.targetType, filter.target);
+  assertFilterEffect(filter.effect, "snapshot filter");
+  assertDateTime(filter.updatedAt, "snapshot filter.updatedAt");
+  if (filter.hitAt !== undefined) {
+    assertDateTime(filter.hitAt, "snapshot filter.hitAt");
   }
-  if (typeof mute.cleared !== "boolean") {
-    throw new TypeError("snapshot mute.cleared must be boolean");
+  if (typeof filter.cleared !== "boolean") {
+    throw new TypeError("snapshot filter.cleared must be boolean");
   }
   for (const field of ["deviceId", "eventId"] as const) {
-    if (typeof mute[field] !== "string" || mute[field].length === 0) {
-      throw new TypeError(`snapshot mute.${field} must be a non-empty string`);
+    if (typeof filter[field] !== "string" || filter[field].length === 0) {
+      throw new TypeError(`snapshot filter.${field} must be a non-empty string`);
     }
-    assertSafeComponent(mute[field] as string, `snapshot mute.${field}`);
+    assertSafeComponent(filter[field] as string, `snapshot filter.${field}`);
   }
 }
 
-export function assertMuteKey(scope: unknown, value: unknown): void {
+export function assertFilterKey(
+  scope: unknown,
+  targetType: unknown,
+  target: unknown,
+): void {
   if (typeof scope !== "string" || scope.length === 0) {
-    throw new TypeError("mute scope must be a non-empty string");
+    throw new TypeError("filter scope must be a non-empty string");
   }
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError("mute value must be a non-empty string");
+  if (targetType !== "ID" && targetType !== "BBSSLIP" && targetType !== "TEXT") {
+    throw new TypeError("filter targetType must be ID, BBSSLIP, or TEXT");
+  }
+  if (typeof target !== "string" || target.length === 0) {
+    throw new TypeError("filter target must be a non-empty string");
+  }
+}
+
+export function assertFilterEffect(value: unknown, name = "filter effect"): void {
+  if (value !== "HIDE" && value !== "TRANSPARENT" && value !== "HIGHLIGHT") {
+    throw new TypeError(`${name} must be HIDE, TRANSPARENT, or HIGHLIGHT`);
   }
 }
 

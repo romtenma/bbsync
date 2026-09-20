@@ -8,7 +8,7 @@ import { BbsSync } from "./bbsync.js";
 import { LocalEventStore } from "./local-event-store.js";
 import {
   projectDetailedThreadStates,
-  projectMuteStates,
+  projectFilterStates,
 } from "./project.js";
 import type { SyncEvent } from "./types.js";
 
@@ -58,7 +58,7 @@ test("syncs thread title and URL without changing the thread key", async () => {
       "最初のタイトル",
       "https://egg.5ch.net/test/read.cgi/software/1234567890/",
     );
-    assert.equal(event.v, 1);
+    assert.equal(event.v, 2);
     assert.equal(event.type, "thread.metadata.updated");
     assert.equal(event.threadId, "@5ch/software/1234567890");
 
@@ -351,30 +351,34 @@ test("keeps a cleared favorite over an older offline level", async () => {
   }
 });
 
-test("synchronizes opaque mute values with timestamps and scopes", async () => {
+test("synchronizes filter targets, effects, timestamps, and scopes", async () => {
   const fixture = await createFixture();
   try {
     const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await desktop.addMute("5ch/software", "TEXT:NGワード", {
+    await desktop.addFilter("5ch/software", "TEXT", "NGワード", "TRANSPARENT", {
       updatedAt: "2026-09-20T00:01:00.000Z",
       hitAt: "2026-09-20T00:00:30.000Z",
     });
-    await desktop.setMute("5ch/software", "ID:ABCDEFG", {
+    await desktop.setFilter("5ch/software", "ID", "ABCDEFG", "HIDE", {
       updatedAt: "2026-09-20T00:02:00.000Z",
     });
-    await desktop.addMute("5ch/news", "ID:ABCDEFG", {
+    await desktop.addFilter("5ch/news", "ID", "ABCDEFG", "HIGHLIGHT", {
       updatedAt: "2026-09-20T00:03:00.000Z",
     });
 
-    assert.deepEqual(await desktop.getMutes("5ch/software"), [
+    assert.deepEqual(await desktop.getFilters("5ch/software"), [
       {
         scope: "5ch/software",
-        value: "ID:ABCDEFG",
+        targetType: "ID",
+        target: "ABCDEFG",
+        effect: "HIDE",
         updatedAt: "2026-09-20T00:02:00.000Z",
       },
       {
         scope: "5ch/software",
-        value: "TEXT:NGワード",
+        targetType: "TEXT",
+        target: "NGワード",
+        effect: "TRANSPARENT",
         updatedAt: "2026-09-20T00:01:00.000Z",
         hitAt: "2026-09-20T00:00:30.000Z",
       },
@@ -384,35 +388,35 @@ test("synchronizes opaque mute values with timestamps and scopes", async () => {
     assert.deepEqual(await new BbsSync({
       storage: fixture.right,
       deviceId: "mobile",
-    }).getMutes(), await desktop.getMutes());
+    }).getFilters(), await desktop.getFilters());
   } finally {
     await fixture.cleanup();
   }
 });
 
-test("keeps a newer mute removal over an older offline update after compaction", async () => {
+test("keeps a newer filter removal over an older offline update after compaction", async () => {
   const fixture = await createFixture(2, 1);
   try {
     const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
     const offline = createSync(fixture.right, "mobile", "2026-09-19T00:00:00Z");
-    await desktop.addMute("5ch/software", "ID:ABCDEFG", {
+    await desktop.addFilter("5ch/software", "ID", "ABCDEFG", "HIDE", {
       updatedAt: "2026-09-20T00:00:00.000Z",
     });
-    await desktop.clearMute("5ch/software", "ID:ABCDEFG", {
+    await desktop.clearFilter("5ch/software", "ID", "ABCDEFG", {
       updatedAt: "2026-09-20T00:01:00.000Z",
     });
     await desktop.compact();
-    await offline.addMute("5ch/software", "ID:ABCDEFG", {
+    await offline.addFilter("5ch/software", "ID", "ABCDEFG", "HIDE", {
       updatedAt: "2026-09-19T23:00:00.000Z",
       hitAt: "2026-09-19T22:59:00.000Z",
     });
 
     await desktop.synchronizeWith(offline.storage);
-    assert.deepEqual(await desktop.getMutes(), []);
+    assert.deepEqual(await desktop.getFilters(), []);
     assert.deepEqual(await new BbsSync({
       storage: offline.storage,
       deviceId: "mobile",
-    }).getMutes(), []);
+    }).getFilters(), []);
   } finally {
     await fixture.cleanup();
   }
@@ -422,7 +426,7 @@ test("uses locale-independent ordinal tie-breaks", () => {
   const occurredAt = "2026-09-20T00:00:00.000Z";
   const events: SyncEvent[] = [
     {
-      v: 1,
+      v: 2,
       id: "favorite-a",
       deviceId: "device-a",
       occurredAt,
@@ -431,7 +435,7 @@ test("uses locale-independent ordinal tie-breaks", () => {
       level: 1,
     },
     {
-      v: 1,
+      v: 2,
       id: "favorite-b",
       deviceId: "device_a",
       occurredAt,
@@ -440,23 +444,26 @@ test("uses locale-independent ordinal tie-breaks", () => {
       level: 5,
     },
     {
-      v: 1,
-      id: "mute-a",
+      v: 2,
+      id: "filter-a",
       deviceId: "device-a",
       occurredAt,
-      type: "mute.set",
+      type: "filter.set",
       scope: "5ch/software",
-      value: "ID:ABCDEFG",
+      targetType: "ID",
+      target: "ABCDEFG",
+      effect: "HIDE",
       updatedAt: occurredAt,
     },
     {
-      v: 1,
-      id: "mute-b",
+      v: 2,
+      id: "filter-b",
       deviceId: "device_a",
       occurredAt,
-      type: "mute.cleared",
+      type: "filter.cleared",
       scope: "5ch/software",
-      value: "ID:ABCDEFG",
+      targetType: "ID",
+      target: "ABCDEFG",
       updatedAt: occurredAt,
     },
   ];
@@ -465,9 +472,9 @@ test("uses locale-independent ordinal tie-breaks", () => {
   assert.equal(thread?.favoriteLevel, 5);
   assert.equal(thread?.favoriteEvent?.deviceId, "device_a");
 
-  const mute = [...projectMuteStates(events).values()][0];
-  assert.equal(mute?.cleared, true);
-  assert.equal(mute?.deviceId, "device_a");
+  const filter = [...projectFilterStates(events).values()][0];
+  assert.equal(filter?.cleared, true);
+  assert.equal(filter?.deviceId, "device_a");
 });
 
 async function createFixture(

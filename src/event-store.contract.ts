@@ -111,7 +111,7 @@ async function flattenSegments(store: EventStore): Promise<readonly SyncEvent[]>
 function sampleEvents(deviceId: string): readonly SyncEvent[] {
   return [
     {
-      v: 1,
+      v: 2,
       id: `${deviceId}-metadata`,
       deviceId,
       occurredAt: "2026-09-20T00:00:00.000Z",
@@ -121,7 +121,7 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
       url: "https://example.com/thread/1",
     },
     {
-      v: 1,
+      v: 2,
       id: `${deviceId}-view`,
       deviceId,
       occurredAt: "2026-09-20T00:00:00.000Z",
@@ -130,7 +130,7 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
       position: 10,
     },
     {
-      v: 1,
+      v: 2,
       id: `${deviceId}-count`,
       deviceId,
       occurredAt: "2026-09-20T00:00:01.000Z",
@@ -139,7 +139,7 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
       responseCount: 12,
     },
     {
-      v: 1,
+      v: 2,
       id: `${deviceId}-favorite`,
       deviceId,
       occurredAt: "2026-09-20T00:00:02.000Z",
@@ -148,7 +148,7 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
       level: 3,
     },
     {
-      v: 1,
+      v: 2,
       id: `${deviceId}-post`,
       deviceId,
       occurredAt: "2026-09-20T00:00:03.000Z",
@@ -157,24 +157,27 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
       position: 11,
     },
     {
-      v: 1,
-      id: `${deviceId}-mute-set`,
+      v: 2,
+      id: `${deviceId}-filter-set`,
       deviceId,
       occurredAt: "2026-09-20T00:00:04.000Z",
-      type: "mute.set",
+      type: "filter.set",
       scope: "5ch/software",
-      value: "ID:ABCDEFG",
+      targetType: "ID",
+      target: "ABCDEFG",
+      effect: "HIDE",
       updatedAt: "2026-09-20T00:00:04.000Z",
       hitAt: "2026-09-20T00:00:03.500Z",
     },
     {
-      v: 1,
-      id: `${deviceId}-mute-cleared`,
+      v: 2,
+      id: `${deviceId}-filter-cleared`,
       deviceId,
       occurredAt: "2026-09-20T00:00:05.000Z",
-      type: "mute.cleared",
+      type: "filter.cleared",
       scope: "5ch/software",
-      value: "ID:ABCDEFG",
+      targetType: "ID",
+      target: "ABCDEFG",
       updatedAt: "2026-09-20T00:00:05.000Z",
     },
   ];
@@ -182,7 +185,7 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
 
 function sampleSnapshot(revision: number): StateSnapshot {
   return {
-    v: 1,
+    v: 2,
     deviceId: "desktop",
     revision,
     createdAt: `2026-09-20T00:0${revision}:00.000Z`,
@@ -202,6 +205,6 @@ function sampleSnapshot(revision: number): StateSnapshot {
         postPositions: [11],
       },
     ],
-    mutes: [],
+    filters: [],
   };
 }

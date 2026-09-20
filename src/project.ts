@@ -8,12 +8,12 @@ import type {
   SnapshotThreadMetadata,
   SnapshotThreadState,
   SnapshotViewed,
-  SnapshotMute,
+  SnapshotFilter,
   StateSnapshot,
   SyncEvent,
   ThreadState,
   FavoriteLevel,
-  MuteEntry,
+  FilterEntry,
 } from "./types.js";
 
 export interface ProjectedThreadState extends ThreadState {
@@ -22,7 +22,7 @@ export interface ProjectedThreadState extends ThreadState {
   readonly favoriteEvent?: SnapshotFavorite;
 }
 
-export interface ProjectedMuteState extends MuteEntry {
+export interface ProjectedFilterState extends FilterEntry {
   readonly cleared: boolean;
   readonly deviceId: string;
   readonly eventId: string;
@@ -39,7 +39,7 @@ interface MutableThreadState {
   postPositions: Set<number>;
 }
 
-interface MutableMuteState extends ProjectedMuteState {}
+interface MutableFilterState extends ProjectedFilterState {}
 
 export async function readAllEvents(
   store: EventStore,
@@ -70,16 +70,16 @@ export async function readProjectedStates(
   return projectDetailedThreadStates(await readAllEvents(store), seeds);
 }
 
-export async function readProjectedMutes(
+export async function readProjectedFilters(
   store: EventStore,
-): Promise<ReadonlyMap<string, ProjectedMuteState>> {
+): Promise<ReadonlyMap<string, ProjectedFilterState>> {
   const snapshots = await Promise.all(
     (await store.listSnapshots()).map((deviceId) => store.readSnapshot(deviceId)),
   );
   const seeds = snapshots.flatMap((snapshot) =>
-    snapshot === undefined ? [] : snapshot.mutes,
+    snapshot === undefined ? [] : snapshot.filters,
   );
-  return projectMuteStates(await readAllEvents(store), seeds);
+  return projectFilterStates(await readAllEvents(store), seeds);
 }
 
 export function snapshotFromStates(
@@ -88,7 +88,7 @@ export function snapshotFromStates(
   createdAt: string,
   coveredSegments: readonly SegmentCoverage[],
   states: ReadonlyMap<string, ProjectedThreadState>,
-  mutes: ReadonlyMap<string, ProjectedMuteState> = new Map(),
+  filters: ReadonlyMap<string, ProjectedFilterState> = new Map(),
 ): StateSnapshot {
   return {
     v: EVENT_SCHEMA_VERSION,
@@ -115,40 +115,44 @@ export function snapshotFromStates(
           : { favorite: state.favoriteEvent }),
         postPositions: [...state.postPositions],
       })),
-    mutes: [...mutes.values()]
-      .sort(compareMuteStates)
-      .map((mute) => ({
-        scope: mute.scope,
-        value: mute.value,
-        updatedAt: mute.updatedAt,
-        ...(mute.hitAt === undefined ? {} : { hitAt: mute.hitAt }),
-        cleared: mute.cleared,
-        deviceId: mute.deviceId,
-        eventId: mute.eventId,
+    filters: [...filters.values()]
+      .sort(compareFilterStates)
+      .map((filter) => ({
+        scope: filter.scope,
+        targetType: filter.targetType,
+        target: filter.target,
+        effect: filter.effect,
+        updatedAt: filter.updatedAt,
+        ...(filter.hitAt === undefined ? {} : { hitAt: filter.hitAt }),
+        cleared: filter.cleared,
+        deviceId: filter.deviceId,
+        eventId: filter.eventId,
       })),
   };
 }
 
-export function projectMuteStates(
+export function projectFilterStates(
   events: readonly SyncEvent[],
-  seeds: readonly SnapshotMute[] = [],
-): ReadonlyMap<string, ProjectedMuteState> {
-  const states = new Map<string, MutableMuteState>();
+  seeds: readonly SnapshotFilter[] = [],
+): ReadonlyMap<string, ProjectedFilterState> {
+  const states = new Map<string, MutableFilterState>();
 
   for (const seed of seeds) {
-    const key = muteKey(seed.scope, seed.value);
+    const key = filterKey(seed.scope, seed.targetType, seed.target);
     const current = states.get(key);
-    if (current === undefined || compareMuteStates(current, seed) < 0) {
+    if (current === undefined || compareFilterStates(current, seed) < 0) {
       states.set(key, { ...seed });
     }
   }
 
   for (const event of events) {
-    if (event.type !== "mute.set" && event.type !== "mute.cleared") continue;
-    const candidate: MutableMuteState = event.type === "mute.set"
+    if (event.type !== "filter.set" && event.type !== "filter.cleared") continue;
+    const candidate: MutableFilterState = event.type === "filter.set"
       ? {
           scope: event.scope,
-          value: event.value,
+          targetType: event.targetType,
+          target: event.target,
+          effect: event.effect,
           updatedAt: event.updatedAt,
           ...(event.hitAt === undefined || event.hitAt === null
             ? {}
@@ -159,15 +163,17 @@ export function projectMuteStates(
         }
       : {
           scope: event.scope,
-          value: event.value,
+          targetType: event.targetType,
+          target: event.target,
+          effect: "HIDE",
           updatedAt: event.updatedAt,
           cleared: true,
           deviceId: event.deviceId,
           eventId: event.id,
         };
-    const key = muteKey(candidate.scope, candidate.value);
+    const key = filterKey(candidate.scope, candidate.targetType, candidate.target);
     const current = states.get(key);
-    if (current === undefined || compareMuteStates(current, candidate) < 0) {
+    if (current === undefined || compareFilterStates(current, candidate) < 0) {
       states.set(key, candidate);
     }
   }
@@ -424,9 +430,9 @@ function compareViewedEvents(
   );
 }
 
-function compareMuteStates(
-  left: Pick<ProjectedMuteState, "updatedAt" | "deviceId" | "eventId">,
-  right: Pick<ProjectedMuteState, "updatedAt" | "deviceId" | "eventId">,
+function compareFilterStates(
+  left: Pick<ProjectedFilterState, "updatedAt" | "deviceId" | "eventId">,
+  right: Pick<ProjectedFilterState, "updatedAt" | "deviceId" | "eventId">,
 ): number {
   return (
     Date.parse(left.updatedAt) - Date.parse(right.updatedAt) ||
@@ -440,6 +446,6 @@ function compareOrdinal(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function muteKey(scope: string, value: string): string {
-  return JSON.stringify([scope, value]);
+function filterKey(scope: string, targetType: string, target: string): string {
+  return JSON.stringify([scope, targetType, target]);
 }
