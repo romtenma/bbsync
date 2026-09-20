@@ -26,22 +26,22 @@ const sync = new BbsSync({
   deviceId: "desktop-main",
 });
 
-await sync.recordThreadView("5ch/software/1234567890", 125);
-await sync.recordResponseCount("5ch/software/1234567890", 130);
-await sync.setFavorite("5ch/software/1234567890", 3);
-await sync.clearFavorite("5ch/software/1234567890");
-await sync.recordPost("5ch/software/1234567890", 126);
+await sync.recordThreadView("@5ch/software/1234567890", 125);
+await sync.recordResponseCount("@5ch/software/1234567890", 130);
+await sync.setFavorite("@5ch/software/1234567890", 3);
+await sync.clearFavorite("@5ch/software/1234567890");
+await sync.recordPost("@5ch/software/1234567890", 126);
 
 // ミュート値はbbsyncでは解釈せず、scopeとともに同期する
-await sync.setMute("5ch/software", "ID:ABCDEFG");
-await sync.setMute("5ch/software", "BBSSLIP:xxxx-yyyy", {
+await sync.setMute("@5ch/software", "ID:ABCDEFG");
+await sync.setMute("@5ch/software", "BBSSLIP:xxxx-yyyy", {
   hitAt: "2026-09-20T01:22:00.000Z",
 });
-await sync.setMute("5ch/software", "TEXT:NGワード");
-const mutes = await sync.getMutes("5ch/software");
-await sync.clearMute("5ch/software", "ID:ABCDEFG");
+await sync.setMute("@5ch/software", "TEXT:NGワード");
+const mutes = await sync.getMutes("@5ch/software");
+await sync.clearMute("@5ch/software", "ID:ABCDEFG");
 
-const state = await sync.getThreadState("5ch/software/1234567890");
+const state = await sync.getThreadState("@5ch/software/1234567890");
 
 // 現在状態をスナップショット化し、古い自端末セグメントを整理する
 await sync.compact();
@@ -49,7 +49,18 @@ await sync.compact();
 
 `threadId`はこのモジュールにとって不透明な文字列です。URLやクライアント内部のキーをどのように正規化するかはアダプター側で決定します。
 
-ミュートも同様に、`scope`と`value`を不透明な文字列として保存します。`scope`には`5ch/software`のようなサイト・板キーを指定します。`value`の`ID:`、`BBSSLIP:`、`TEXT:`などの形式や、端末ごとにどの種類を適用するかはクライアント側で決定し、bbsyncは解釈しません。
+サイトキーをURLから作る場合は、`normalizeSiteKey()`を使用できます。規定サイトは`@5ch`、`@bbspink`、`@open2ch`、`@machi`、`@shitaraba`へ正規化され、サブドメインも同じキーになります。未知サイトは正規化したホスト名（サブドメインを含む）になります。
+
+```ts
+import { normalizeSiteKey } from "@romtenma/bbsync";
+
+normalizeSiteKey("https://egg.5ch.net/test/read.cgi/software/123/");
+// "@5ch"
+normalizeSiteKey("https://sub.testtest.net/board/");
+// "sub.testtest.net"
+```
+
+ミュートも同様に、`scope`と`value`を不透明な文字列として保存します。`scope`には`@5ch/software`のようなサイト・板キーを指定します。`value`の`ID:`、`BBSSLIP:`、`TEXT:`などの形式や、端末ごとにどの種類を適用するかはクライアント側で決定し、bbsyncは解釈しません。
 
 ミュート情報には必須の`updatedAt`と、条件がスレッド内に現れた日時を表す任意の`hitAt`があります。`updatedAt`を省略した場合はローカル時計から自動設定されます。解除も同期され、古いオフライン端末の更新によって復活しないように扱われます。
 
@@ -76,8 +87,8 @@ bbsync-data/
 各行はバージョン付きイベントです。
 
 ```json
-{"v":1,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"5ch/software/1234567890","type":"thread.viewed","position":125}
-{"v":1,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"mute.set","scope":"5ch/software","value":"ID:ABCDEFG","updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
+{"v":1,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"@5ch/software/1234567890","type":"thread.viewed","position":125}
+{"v":1,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"mute.set","scope":"@5ch/software","value":"ID:ABCDEFG","updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
 ```
 
 ## 統合規則

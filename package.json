@@ -1,6 +1,6 @@
 {
   "name": "@romtenma/bbsync",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "JSONL-based synchronization primitives for bulletin board clients",
   "license": "MIT",
   "type": "module",
@@ -25,7 +25,7 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/bbsync.test.js dist/local-event-store.contract.test.js",
+    "test": "npm run build && node --test dist/bbsync.test.js dist/local-event-store.contract.test.js dist/site.test.js",
     "prepack": "npm test"
   },
   "repository": {

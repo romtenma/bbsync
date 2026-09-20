@@ -89,17 +89,26 @@ UUID、またはアプリ名とUUIDを組み合わせた値を推奨する。表
 <site-key>/<board-key>/<thread-key>
 ```
 
-- `site-key` はサイトプロファイルで定義された小文字 ASCII の固定値とする。
+- `site-key` はサイトプロファイルで定義された固定値とする。規定サイトのキーは `@` で始める。
 - `board-key` と `thread-key` は表示名ではなく、サイト上で永続的な識別子を使用する。
 - URL のホスト名、スキーム、クエリ、フラグメント、末尾スラッシュをそのままキーにしてはならない。
 - 大文字小文字、Unicode 正規化、URL エンコード、旧ドメインやミラーの扱いはサイトプロファイルに従う。
-- 未知のサイトについて、アダプター独自のキーを既存の `site-key` として発行してはならない。
+- 未知のサイトについて、アダプター独自のキーを既存の `site-key` として発行してはならない。未知のサイトは正規化したホスト名（サブドメインを含む）を `site-key` とする。
 
-v1 の 5ch プロファイルは次のとおりである。
+v1 の規定サイトプロファイルは次のとおりである。ホスト名が一致する場合と、指定ホストのサブドメインである場合に同じキーへ正規化する。
+
+| `site-key` | ドメイン |
+| --- | --- |
+| `@5ch` | `5ch.net`, `5ch.io`, `2ch.net` |
+| `@bbspink` | `bbspink.com` |
+| `@open2ch` | `open2ch.net` |
+| `@machi` | `machi.io` |
+| `@shitaraba` | `jbbs.shitaraba.net` |
+
+5ch の `board-key` と `thread-key` は次の規則で生成する。
 
 | 要素 | 規則 |
 | --- | --- |
-| `site-key` | `5ch` |
 | `board-key` | `test/read.cgi/` の直後にある板キーをそのまま使用 |
 | `thread-key` | その次にある数字のスレッドキー。先頭のゼロは除去 |
 | サーバー名 | 使用しない。サーバー移転前後で同じキーにする |
@@ -108,10 +117,12 @@ v1 の 5ch プロファイルは次のとおりである。
 
 ```text
 https://egg.5ch.net/test/read.cgi/software/1750000000/
-→ 5ch/software/1750000000
+→ @5ch/software/1750000000
 ```
 
 URL 以外の内部データから生成する場合も同じ結果にならなければならない。5ch 以外のサイトを相互運用対象に加える場合は、実装前にこの節へサイトプロファイルを追加する。
+
+ホスト名は小文字化し、末尾のドットを除去する。スキーム、ポート、パス、クエリ、フラグメントはキーに含めない。未知のサイトではサブドメインも残す。例えば `https://sub.testtest.net/board/` は `sub.testtest.net` を `site-key` とする。既知サイトの判定はDNSラベル境界で行い、`not5ch.net`を`@5ch`として扱ってはならない。
 
 ### 5.4 `scope`
 
@@ -121,7 +132,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 <site-key>/<board-key>
 ```
 
-例: `5ch/software`
+例: `@5ch/software`
 
 `scope` と `value` の組が1つのミュート項目のキーになる。両方とも空文字列は禁止する。
 
@@ -415,7 +426,7 @@ await adapter.applyProjectedState({ threads, mutes }, {
 アダプターを相互運用対応とする前に、少なくとも次を確認する。
 
 - [ ] `deviceId` を永続化し、プロファイル複製時に再生成する。
-- [ ] 同じ 5ch URLから `5ch/<board>/<thread>` の同じキーを生成する。
+- [ ] 同じ 5ch URLから `@5ch/<board>/<thread>` の同じキーを生成する。
 - [ ] レス番号はフィルター後の表示位置ではなく元の番号を使う。
 - [ ] 全7イベントを正しい制約で発火する。
 - [ ] 同期反映からイベントを再発火しない。
@@ -435,7 +446,7 @@ await adapter.applyProjectedState({ threads, mutes }, {
 
 ```json
 {
-  "threadId": "5ch/software/1750000000",
+  "threadId": "@5ch/software/1750000000",
   "lastReadPosition": 125,
   "favoriteLevel": 3,
   "postPositions": [126]

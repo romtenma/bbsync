@@ -14,6 +14,12 @@ export {
 export { segmentKey, type EventStore } from "./store.js";
 export { synchronizeStores } from "./synchronize.js";
 export {
+  KNOWN_SITE_PROFILES,
+  normalizeHostname,
+  normalizeSiteKey,
+  type SiteProfile,
+} from "./site.js";
+export {
   EVENT_SCHEMA_VERSION,
   type EventSchemaVersion,
   type FavoriteClearedEvent,
