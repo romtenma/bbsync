@@ -104,7 +104,7 @@ v2 の規定サイトプロファイルは次のとおりである。ホスト�
 | `@bbspink` | `bbspink.com` |
 | `@open2ch` | `open2ch.net` |
 | `@machi` | `machi.to` |
-| `@shitaraba` | `jbbs.shitaraba.net` |
+| `@shitaraba` | `shitaraba.net` |
 
 5ch の `board-key` と `thread-key` は次の規則で生成する。
 
@@ -277,7 +277,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | フィールド | 型 | 制約 |
 | --- | --- | --- |
 | `scope` | string | 5.4節の共通キー |
-| `targetType` | string | 解除対象の種類。値は専用ブラウザが定義する。推奨値の例: `ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD` |
+| `targetType` | string | 解除対象の種類。値は専用ブラウザが定義する。推奨値の例: `ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`NAME`、`MAIL`、`TRIP`、`URL`、`IMGHASH`、`WORD` |
 | `target` | string | 解除対象と完全一致 |
 | `updatedAt` | string | 意味上の更新日時 |
 
@@ -295,9 +295,11 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `SLIP` | BBS_SLIP 表示値との完全一致 | サイト表示値どおり |
 | `SLIP-PRE` | BBS_SLIP の前半との一致 | サイト表示値どおり |
 | `SLIP-SUF` | BBS_SLIP の後半との一致 | サイト表示値どおり |
-| `MAIL` | メール欄との一致 | 専用ブラウザの仕様による |
 | `NAME` | 名前欄との一致 | 専用ブラウザの仕様による |
+| `MAIL` | メール欄との一致 | 専用ブラウザの仕様による |
 | `TRIP` | トリップとの一致 | 専用ブラウザの仕様による |
+| `URL`  | プロトコルを抜いたURLとの一致 | 専用ブラウザの仕様による |
+| `IMGHASH` | 画像のハッシュ値 | 専用ブラウザの仕様による |
 | `WORD` | 本文に含まれる文字列との一致 | Unicode NFC、文字列一致 |
 
 `effect`の値も専用ブラウザが定義する。以下は推奨値の例であり、これらに限定されない。

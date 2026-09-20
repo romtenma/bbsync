@@ -29,7 +29,7 @@ export const KNOWN_SITE_PROFILES: readonly SiteProfile[] = Object.freeze([
   }),
   Object.freeze({
     siteKey: "@shitaraba",
-    domains: Object.freeze(["jbbs.shitaraba.net"]),
+    domains: Object.freeze(["jbbs.shitaraba.net", "shitaraba.net", "shitaraba.com"]),
   }),
 ]);
 
