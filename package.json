@@ -1,6 +1,6 @@
 {
   "name": "@romtenma/bbsync",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "JSONL-based synchronization primitives for bulletin board clients",
   "license": "MIT",
   "type": "module",
