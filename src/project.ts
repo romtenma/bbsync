@@ -353,8 +353,9 @@ function compareFavoriteEvents(
 ): number {
   return (
     Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
-    left.deviceId.localeCompare(right.deviceId) ||
-    ("id" in left ? left.id : left.eventId).localeCompare(
+    compareOrdinal(left.deviceId, right.deviceId) ||
+    compareOrdinal(
+      "id" in left ? left.id : left.eventId,
       "id" in right ? right.id : right.eventId,
     )
   );
@@ -366,8 +367,9 @@ function compareViewedEvents(
 ): number {
   return (
     Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
-    left.deviceId.localeCompare(right.deviceId) ||
-    ("id" in left ? left.id : left.eventId).localeCompare(
+    compareOrdinal(left.deviceId, right.deviceId) ||
+    compareOrdinal(
+      "id" in left ? left.id : left.eventId,
       "id" in right ? right.id : right.eventId,
     )
   );
@@ -379,9 +381,14 @@ function compareMuteStates(
 ): number {
   return (
     Date.parse(left.updatedAt) - Date.parse(right.updatedAt) ||
-    left.deviceId.localeCompare(right.deviceId) ||
-    left.eventId.localeCompare(right.eventId)
+    compareOrdinal(left.deviceId, right.deviceId) ||
+    compareOrdinal(left.eventId, right.eventId)
   );
+}
+
+/** Locale-independent ordering for protocol tie-break fields. */
+function compareOrdinal(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function muteKey(scope: string, value: string): string {

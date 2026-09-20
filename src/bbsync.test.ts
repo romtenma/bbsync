@@ -6,6 +6,11 @@ import test from "node:test";
 
 import { BbsSync } from "./bbsync.js";
 import { LocalEventStore } from "./local-event-store.js";
+import {
+  projectDetailedThreadStates,
+  projectMuteStates,
+} from "./project.js";
+import type { SyncEvent } from "./types.js";
 
 test("projects bulletin-board state from JSONL events", async () => {
   const fixture = await createFixture();
@@ -311,6 +316,58 @@ test("keeps a newer mute removal over an older offline update after compaction",
   } finally {
     await fixture.cleanup();
   }
+});
+
+test("uses locale-independent ordinal tie-breaks", () => {
+  const occurredAt = "2026-09-20T00:00:00.000Z";
+  const events: SyncEvent[] = [
+    {
+      v: 1,
+      id: "favorite-a",
+      deviceId: "device-a",
+      occurredAt,
+      threadId: "thread-1",
+      type: "thread.favorite.set",
+      level: 1,
+    },
+    {
+      v: 1,
+      id: "favorite-b",
+      deviceId: "device_a",
+      occurredAt,
+      threadId: "thread-1",
+      type: "thread.favorite.set",
+      level: 5,
+    },
+    {
+      v: 1,
+      id: "mute-a",
+      deviceId: "device-a",
+      occurredAt,
+      type: "mute.set",
+      scope: "5ch/software",
+      value: "ID:ABCDEFG",
+      updatedAt: occurredAt,
+    },
+    {
+      v: 1,
+      id: "mute-b",
+      deviceId: "device_a",
+      occurredAt,
+      type: "mute.cleared",
+      scope: "5ch/software",
+      value: "ID:ABCDEFG",
+      updatedAt: occurredAt,
+    },
+  ];
+
+  const thread = projectDetailedThreadStates(events).get("thread-1");
+  assert.equal(thread?.favoriteLevel, 5);
+  assert.equal(thread?.favoriteEvent?.deviceId, "device_a");
+
+  const mute = [...projectMuteStates(events).values()][0];
+  assert.equal(mute?.cleared, true);
+  assert.equal(mute?.deviceId, "device_a");
 });
 
 async function createFixture(
