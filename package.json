@@ -1,0 +1,34 @@
+{
+  "name": "bbsync",
+  "version": "0.1.0",
+  "description": "JSONL-based synchronization primitives for bulletin board clients",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/event-store.contract.js",
+    "!dist/event-store.contract.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/bbsync.test.js dist/local-event-store.contract.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.6",
+    "typescript": "^5.9.0"
+  }
+}
