@@ -2,6 +2,7 @@
   "name": "bbsync",
   "version": "0.1.0",
   "description": "JSONL-based synchronization primitives for bulletin board clients",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -18,11 +19,31 @@
     "!dist/**/*.test.d.ts",
     "!dist/event-store.contract.js",
     "!dist/event-store.contract.d.ts",
+    "docs/**/*.md",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/bbsync.test.js dist/local-event-store.contract.test.js"
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/bbsync.test.js dist/local-event-store.contract.test.js",
+    "prepack": "npm test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/romtenma/bbsync.git"
+  },
+  "bugs": {
+    "url": "https://github.com/romtenma/bbsync/issues"
+  },
+  "homepage": "https://github.com/romtenma/bbsync#readme",
+  "keywords": [
+    "bbs",
+    "sync",
+    "jsonl",
+    "event-store"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=20"
