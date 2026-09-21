@@ -21,6 +21,8 @@ export interface SnapshotViewed {
   readonly occurredAt: string;
   readonly deviceId: string;
   readonly eventId: string;
+  /** First position visible in the viewport, when supplied by the adapter. */
+  readonly firstPosition?: number;
 }
 
 /** The latest marker that clears a thread from browsing history. */
@@ -50,6 +52,8 @@ export interface SnapshotThreadState {
   readonly threadId: string;
   readonly metadata?: SnapshotThreadMetadata;
   readonly lastReadPosition?: number;
+  /** First position from the latest viewed viewport, when supplied. */
+  readonly firstReadPosition?: number;
   readonly responseCount?: number;
   readonly lastViewed?: SnapshotViewed;
   readonly historyCleared?: SnapshotHistoryCleared;
@@ -108,6 +112,8 @@ interface BaseThreadEvent extends BaseEvent {
 export interface ThreadViewedEvent extends BaseThreadEvent {
   readonly type: "thread.viewed";
   readonly position: number;
+  /** First position visible in the viewport, when supplied by the adapter. */
+  readonly firstPosition?: number;
 }
 
 export interface ThreadHistoryClearedEvent extends BaseThreadEvent {
@@ -188,6 +194,7 @@ interface BaseThreadEventInput extends BaseEventInput {
 export interface ThreadViewedInput extends BaseThreadEventInput {
   readonly type: "thread.viewed";
   readonly position: number;
+  readonly firstPosition?: number;
 }
 
 export interface ThreadHistoryClearedInput extends BaseThreadEventInput {
@@ -270,6 +277,7 @@ export interface ThreadState {
   readonly title?: string;
   readonly url?: string;
   readonly lastReadPosition?: number;
+  readonly firstReadPosition?: number;
   readonly responseCount?: number;
   readonly lastViewedAt?: string;
   readonly favoriteLevel?: FavoriteLevel;

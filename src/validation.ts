@@ -73,6 +73,12 @@ export function assertEvent(value: unknown): asserts value is SyncEvent {
       break;
     case "thread.viewed":
       assertPosition(event.position, true);
+      if (event.firstPosition !== undefined) {
+        assertPosition(event.firstPosition, true);
+        if ((event.firstPosition as number) > (event.position as number)) {
+          throw new TypeError("event.firstPosition must be less than or equal to event.position");
+        }
+      }
       break;
     case "thread.history.cleared":
       break;
@@ -174,6 +180,19 @@ function assertSnapshotThread(value: unknown): void {
     (!Number.isSafeInteger(thread.lastReadPosition) || (thread.lastReadPosition as number) < 0)
   ) {
     throw new TypeError("snapshot lastReadPosition must be a non-negative safe integer");
+  }
+  if (
+    thread.firstReadPosition !== undefined &&
+    (!Number.isSafeInteger(thread.firstReadPosition) || (thread.firstReadPosition as number) < 0)
+  ) {
+    throw new TypeError("snapshot firstReadPosition must be a non-negative safe integer");
+  }
+  if (
+    thread.firstReadPosition !== undefined &&
+    thread.lastReadPosition !== undefined &&
+    (thread.firstReadPosition as number) > (thread.lastReadPosition as number)
+  ) {
+    throw new TypeError("snapshot firstReadPosition must be less than or equal to lastReadPosition");
   }
   if (
     thread.responseCount !== undefined &&
@@ -291,6 +310,9 @@ function assertSnapshotViewed(value: unknown): asserts value is SnapshotViewed {
       throw new TypeError(`snapshot lastViewed.${field} must be a non-empty string`);
     }
     assertSafeComponent(viewed[field] as string, `snapshot lastViewed.${field}`);
+  }
+  if (viewed.firstPosition !== undefined) {
+    assertPosition(viewed.firstPosition, true);
   }
 }
 

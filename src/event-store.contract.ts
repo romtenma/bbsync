@@ -128,6 +128,7 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
       threadId: "thread-1",
       type: "thread.viewed",
       position: 10,
+      firstPosition: 8,
     },
     {
       v: 2,
@@ -204,7 +205,14 @@ function sampleSnapshot(revision: number): StateSnapshot {
       {
         threadId: "thread-1",
         lastReadPosition: 10,
+        firstReadPosition: 8,
         responseCount: 12,
+        lastViewed: {
+          occurredAt: "2026-09-20T00:00:00.000Z",
+          deviceId: "desktop",
+          eventId: "desktop-view",
+          firstPosition: 8,
+        },
         favorite: {
           cleared: false,
           level: 3,

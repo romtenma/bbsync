@@ -26,7 +26,7 @@ const sync = new BbsSync({
   deviceId: "desktop-main",
 });
 
-await sync.recordThreadView("egg.5ch.net/software/1234567890", 125);
+await sync.recordThreadView("egg.5ch.net/software/1234567890", 125, 110);
 await sync.setThreadMetadata(
   "egg.5ch.net/software/1234567890",
   "ソフトウェア板のスレッド",
@@ -104,13 +104,13 @@ bbsync-data/
 
 ```json
 {"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:40.000Z","threadId":"egg.5ch.net/software/1234567890","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1234567890/"}
-{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"egg.5ch.net/software/1234567890","type":"thread.viewed","position":125}
+{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"egg.5ch.net/software/1234567890","type":"thread.viewed","position":125,"firstPosition":110}
 {"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"filter.set","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","isRegex":false,"updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
 ```
 
 ## 統合規則
 
-- 閲覧位置: 最大の位置を採用
+- 閲覧位置: `position`（表示上の最後）は最大の位置を採用。`firstPosition`（表示上の最初）は最新の`thread.viewed`に指定された値を採用し、省略時は未設定
 - タイトル・URL: 一組として扱い、`occurredAt`が新しい更新を採用。同時刻の場合は端末IDとイベントIDで決定
 - 閲覧日時: `thread.viewed`の`occurredAt`が新しい日時を採用
 - 閲覧履歴削除: `thread.history.cleared`より前の閲覧位置・閲覧日時を無効化。削除後に再閲覧すると新しい履歴として復活

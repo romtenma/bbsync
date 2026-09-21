@@ -47,6 +47,74 @@ test("projects bulletin-board state from JSONL events", async () => {
   }
 });
 
+test("records an optional first viewport position alongside the last position", async () => {
+  const fixture = await createFixture();
+  try {
+    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    const event = await sync.recordThreadView("thread-1", 20, 12);
+
+    assert.deepEqual(event, {
+      v: 2,
+      id: "id-desktop-1",
+      deviceId: "desktop",
+      occurredAt: "2026-09-20T00:00:00.000Z",
+      threadId: "thread-1",
+      type: "thread.viewed",
+      position: 20,
+      firstPosition: 12,
+    });
+    assert.deepEqual(await sync.getThreadState("thread-1"), {
+      threadId: "thread-1",
+      lastReadPosition: 20,
+      firstReadPosition: 12,
+      lastViewedAt: "2026-09-20T00:00:00.000Z",
+      postPositions: [],
+    });
+
+    const snapshot = await sync.compact();
+    assert.deepEqual(snapshot.threads[0], {
+      threadId: "thread-1",
+      lastReadPosition: 20,
+      firstReadPosition: 12,
+      lastViewed: {
+        occurredAt: "2026-09-20T00:00:00.000Z",
+        deviceId: "desktop",
+        eventId: "id-desktop-1",
+        firstPosition: 12,
+      },
+      postPositions: [],
+    });
+    assert.deepEqual(
+      await new BbsSync({
+        storage: fixture.left,
+        deviceId: "mobile",
+      }).getThreadState("thread-1"),
+      {
+        threadId: "thread-1",
+        lastReadPosition: 20,
+        firstReadPosition: 12,
+        lastViewedAt: "2026-09-20T00:00:00.000Z",
+        postPositions: [],
+      },
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("rejects a first viewport position after the last position", async () => {
+  const fixture = await createFixture();
+  try {
+    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    await assert.rejects(
+      () => sync.recordThreadView("thread-1", 10, 11),
+      /firstPosition must be less than or equal to position/,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("clears a post position and keeps the deletion marker through sync and compaction", async () => {
   const fixture = await createFixture(1, 0);
   try {

@@ -65,9 +65,17 @@ export class BbsSync {
   async recordThreadView(
     threadId: string,
     position: number,
+    firstPosition?: number,
   ): Promise<SyncEvent> {
     const [event] = await this.append([
-      { type: "thread.viewed", threadId, position },
+      {
+        type: "thread.viewed",
+        threadId,
+        position,
+        ...(firstPosition === undefined
+          ? {}
+          : { firstPosition }),
+      },
     ]);
     return event!;
   }
@@ -221,6 +229,9 @@ export class BbsSync {
             ...(state.lastReadPosition === undefined
               ? {}
               : { lastReadPosition: state.lastReadPosition }),
+            ...(state.firstReadPosition === undefined
+              ? {}
+              : { firstReadPosition: state.firstReadPosition }),
             ...(state.responseCount === undefined
               ? {}
               : { responseCount: state.responseCount }),
@@ -350,7 +361,20 @@ export class BbsSync {
         };
       case "thread.viewed":
         assertPosition(input.position, true);
-        return { ...threadBase, type: input.type, position: input.position };
+        if (input.firstPosition !== undefined) {
+          assertPosition(input.firstPosition, true);
+          if (input.firstPosition > input.position) {
+            throw new TypeError("firstPosition must be less than or equal to position");
+          }
+        }
+        return {
+          ...threadBase,
+          type: input.type,
+          position: input.position,
+          ...(input.firstPosition === undefined
+            ? {}
+            : { firstPosition: input.firstPosition }),
+        };
       case "thread.history.cleared":
         return { ...threadBase, type: input.type };
       case "thread.response-count.observed":

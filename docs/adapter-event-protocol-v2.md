@@ -25,7 +25,7 @@ v2 が同期する状態は次のとおりである。
 | 状態 | イベント | 統合方式 |
 | --- | --- | --- |
 | スレッドタイトル・遷移先URL | `thread.metadata.updated` | `(occurredAt, deviceId, id)`の最新 |
-| 最終既読位置・最終閲覧日時 | `thread.viewed` | 位置は最大値、日時は最新イベント |
+| 最終既読位置・表示範囲・最終閲覧日時 | `thread.viewed` | `position`（表示上の最後）は最大値、`firstPosition`（表示上の最初）は最新イベントの任意値、日時は最新イベント |
 | 閲覧履歴の削除マーカー | `thread.history.cleared` | `(occurredAt, deviceId, id)`の最新。これより前の閲覧状態を無効化 |
 | 観測済みレス数 | `thread.response-count.observed` | 最大値 |
 | お気に入りとレベル | `thread.favorite.set` / `thread.favorite.cleared` | 最終更新優先 |
@@ -153,19 +153,22 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 ### 7.1 `thread.viewed`
 
-スレッドを閲覧したことと、その時点の最終既読位置を表す。
+スレッドを閲覧したことと、その時点の表示範囲および最終既読位置を表す。`position` は表示上の最後の位置で必須、`firstPosition` は表示上の最初の位置で任意である。
 
 | フィールド | 型 | 制約 |
 | --- | --- | --- |
 | `threadId` | string | 5.3節の共通キー |
 | `position` | integer | `0` 以上 |
+| `firstPosition` | integer | 任意。指定する場合は `0` 以上かつ `position` 以下 |
 
 `position` は表示行番号ではなく、サイト上のレス番号を使用する。あぼーん、フィルター、折りたたみなどで非表示のレスも元の番号体系に含める。`0` は既読レスなしを表す。
+
+`firstPosition` を指定する場合は、同じ画面に表示した範囲の最初のレス番号を指定する。表示上の最初と最後を記録できる端末は指定し、従来どおり最後の位置だけを扱う端末は省略する。`firstPosition` は状態の `firstReadPosition` として最新の閲覧イベントから反映される。
 
 アダプターは少なくとも、利用者がスレッドを明示的に開いたとき、および最終既読位置が進んだときにイベントを記録すべきである。同じ閲覧セッション中のスクロール通知は間引いてよいが、セッション終了時または短いデバウンス後に最新位置を記録する。
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440001","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.viewed","position":125}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440001","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.viewed","position":125,"firstPosition":110}
 ```
 
 ### 7.1.1 `thread.history.cleared`
@@ -345,13 +348,14 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | --- | --- |
 | `title`, `url` | 同じ`threadId`の`thread.metadata.updated`を`(occurredAt, deviceId, id)`で比較し、最大のイベントの組を採用 |
 | `lastReadPosition` | 最新の `thread.history.cleared` より後に発生した `thread.viewed.position` の最大値 |
+| `firstReadPosition` | 最新の `thread.history.cleared` より後に発生し、`(occurredAt, deviceId, id)` が最大の `thread.viewed.firstPosition`。最新イベントで省略された場合は未設定 |
 | `lastViewedAt` | 最新の `thread.history.cleared` より後に発生し、`(occurredAt, deviceId, id)` が最大の `thread.viewed` の `occurredAt` |
 | 閲覧履歴削除 | `(occurredAt, deviceId, id)` が最大の `thread.history.cleared` より前の閲覧状態を無効化 |
 | `responseCount` | 最新の `thread.history.cleared` より後に発生した `responseCount` の最大値 |
 | `favoriteLevel` | 8.2節で勝ったイベントが `set` ならその `level`、`cleared` なら未設定 |
 | `postPositions` | 位置ごとに最終更新が `thread.post.recorded` となった位置の重複なし昇順集合 |
 
-最終閲覧日時と最終既読位置は独立して統合する。たとえば、位置100を読んだ古いイベントと、その後に位置80を再閲覧したイベントがある場合、`lastReadPosition` は100、`lastViewedAt` は後者の日時になる。
+最終閲覧日時と最終既読位置は独立して統合する。たとえば、位置100を読んだ古いイベントと、その後に位置80を再閲覧したイベントがある場合、`lastReadPosition` は100、`lastViewedAt` は後者の日時になる。`firstReadPosition` は後者のイベントに `firstPosition` があればその値、なければ未設定になる。
 
 タイトルとURLは常に同じイベントから取得する。スナップショットには値に加えて、そのイベントの`occurredAt`、`deviceId`、`eventId`を保存し、コンパクション後も古いオフライン端末の更新で上書きされないようにする。メタデータ未取得のスレッドでは`title`と`url`を省略する。
 
@@ -391,7 +395,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | ブラウザ側の操作 | 発火するイベント |
 | --- | --- |
 | スレッドを開く、またはタイトル・遷移先URLを取得・更新 | `thread.metadata.updated` |
-| スレッドを開く、または既読位置が進む | `thread.viewed` |
+| スレッドを開く、表示範囲または既読位置が変わる | `thread.viewed` |
 | 利用者がスレッドの閲覧履歴を削除 | `thread.history.cleared` |
 | サーバーからレス一覧を取得し件数が判明 | `thread.response-count.observed` |
 | お気に入りを追加、またはレベルを変更 | `thread.favorite.set` |
@@ -438,7 +442,7 @@ v2 はベクトル時計やサーバー時刻による補正を定義しない�
 | イベント | 推奨 API |
 | --- | --- |
 | `thread.metadata.updated` | `setThreadMetadata(threadId, title, url)` |
-| `thread.viewed` | `recordThreadView(threadId, position)` |
+| `thread.viewed` | `recordThreadView(threadId, position, firstPosition)`。`firstPosition` は省略可能 |
 | `thread.history.cleared` | `clearThreadHistory(threadId)` |
 | `thread.response-count.observed` | `recordResponseCount(threadId, responseCount)` |
 | `thread.favorite.set` | `setFavorite(threadId, level)` |
@@ -515,6 +519,7 @@ await adapter.applyProjectedState({ threads, filters }, {
 {
   "threadId": "egg.5ch.net/software/1750000000",
   "lastReadPosition": 125,
+  "firstReadPosition": 110,
   "favoriteLevel": 3,
   "postPositions": [126]
 }

@@ -50,6 +50,7 @@ interface MutableThreadState {
   threadId: string;
   metadata?: SnapshotThreadMetadata;
   lastReadPosition?: number;
+  firstReadPosition?: number;
   responseCount?: number;
   lastViewed?: SnapshotViewed;
   historyCleared?: SnapshotHistoryCleared;
@@ -196,6 +197,9 @@ export function snapshotFromStates(
       ...(state.lastReadPosition === undefined
         ? {}
         : { lastReadPosition: state.lastReadPosition }),
+      ...(state.firstReadPosition === undefined
+        ? {}
+        : { firstReadPosition: state.firstReadPosition }),
       ...(state.responseCount === undefined
         ? {}
         : { responseCount: state.responseCount }),
@@ -309,6 +313,9 @@ export function projectThreadStates(
           ...(state.lastReadPosition === undefined
             ? {}
             : { lastReadPosition: state.lastReadPosition }),
+          ...(state.firstReadPosition === undefined
+            ? {}
+            : { firstReadPosition: state.firstReadPosition }),
           ...(state.responseCount === undefined
             ? {}
             : { responseCount: state.responseCount }),
@@ -339,6 +346,7 @@ export function projectDetailedThreadStates(
     ) {
       state.historyCleared = seed.historyCleared;
       state.lastReadPosition = undefined;
+      state.firstReadPosition = undefined;
       state.responseCount = undefined;
       state.lastViewed = undefined;
     }
@@ -362,6 +370,14 @@ export function projectDetailedThreadStates(
         seed.lastReadPosition,
       );
     }
+    if (
+      seedIsCurrentHistoryEpoch &&
+      seed.lastViewed === undefined &&
+      state.lastViewed === undefined &&
+      seed.firstReadPosition !== undefined
+    ) {
+      state.firstReadPosition = seed.firstReadPosition;
+    }
     if (seedIsCurrentHistoryEpoch && seed.responseCount !== undefined) {
       state.responseCount = Math.max(
         state.responseCount ?? 0,
@@ -375,6 +391,8 @@ export function projectDetailedThreadStates(
         compareViewedEvents(state.lastViewed, seed.lastViewed) < 0)
     ) {
       state.lastViewed = seed.lastViewed;
+      state.firstReadPosition =
+        seed.firstReadPosition ?? seed.lastViewed.firstPosition;
     }
     for (const position of seed.postPositions) {
       state.postPositions.add(position);
@@ -447,7 +465,11 @@ export function projectDetailedThreadStates(
             occurredAt: event.occurredAt,
             deviceId: event.deviceId,
             eventId: event.id,
+            ...(event.firstPosition === undefined
+              ? {}
+              : { firstPosition: event.firstPosition }),
           };
+          state.firstReadPosition = event.firstPosition;
         }
         break;
       case "thread.history.cleared":
@@ -461,6 +483,7 @@ export function projectDetailedThreadStates(
             eventId: event.id,
           };
           state.lastReadPosition = undefined;
+          state.firstReadPosition = undefined;
           state.responseCount = undefined;
           state.lastViewed = undefined;
         }
@@ -550,6 +573,9 @@ export function projectDetailedThreadStates(
             ...(state.lastReadPosition === undefined
               ? {}
               : { lastReadPosition: state.lastReadPosition }),
+            ...(state.firstReadPosition === undefined
+              ? {}
+              : { firstReadPosition: state.firstReadPosition }),
             ...(state.responseCount === undefined
               ? {}
               : { responseCount: state.responseCount }),
@@ -582,7 +608,11 @@ export function isProjectedThreadStateVisible(
     return true;
   }
   if (state.historyCleared !== undefined) {
-    return state.lastReadPosition !== undefined || state.lastViewed !== undefined;
+    return (
+      state.lastReadPosition !== undefined ||
+      state.firstReadPosition !== undefined ||
+      state.lastViewed !== undefined
+    );
   }
   // Preserve the pre-existing behavior for states that have never received
   // a history-clear marker, including an explicitly cleared favorite.
