@@ -4,6 +4,7 @@ import {
   readProjectedStates,
   readProjectedFilters,
   snapshotFromStates,
+  isProjectedThreadStateVisible,
 } from "./project.js";
 import type { EventStore } from "./store.js";
 import { synchronizeStores } from "./synchronize.js";
@@ -67,6 +68,13 @@ export class BbsSync {
   ): Promise<SyncEvent> {
     const [event] = await this.append([
       { type: "thread.viewed", threadId, position },
+    ]);
+    return event!;
+  }
+
+  async clearThreadHistory(threadId: string): Promise<SyncEvent> {
+    const [event] = await this.append([
+      { type: "thread.history.cleared", threadId },
     ]);
     return event!;
   }
@@ -184,28 +192,30 @@ export class BbsSync {
   async getStates(): Promise<ReadonlyMap<string, ThreadState>> {
     const projected = await readProjectedStates(this.storage);
     return new Map(
-      [...projected.entries()].map(([threadId, state]) => [
-        threadId,
-        {
-          threadId: state.threadId,
-          ...(state.metadata === undefined
-            ? {}
-            : { title: state.metadata.title, url: state.metadata.url }),
-          ...(state.lastReadPosition === undefined
-            ? {}
-            : { lastReadPosition: state.lastReadPosition }),
-          ...(state.responseCount === undefined
-            ? {}
-            : { responseCount: state.responseCount }),
-          ...(state.lastViewed === undefined
-            ? {}
-            : { lastViewedAt: state.lastViewed.occurredAt }),
-          ...(state.favoriteLevel === undefined
-            ? {}
-            : { favoriteLevel: state.favoriteLevel }),
-          postPositions: state.postPositions,
-        },
-      ]),
+      [...projected.entries()]
+        .filter(([, state]) => isProjectedThreadStateVisible(state))
+        .map(([threadId, state]) => [
+          threadId,
+          {
+            threadId: state.threadId,
+            ...(state.metadata === undefined
+              ? {}
+              : { title: state.metadata.title, url: state.metadata.url }),
+            ...(state.lastReadPosition === undefined
+              ? {}
+              : { lastReadPosition: state.lastReadPosition }),
+            ...(state.responseCount === undefined
+              ? {}
+              : { responseCount: state.responseCount }),
+            ...(state.lastViewed === undefined
+              ? {}
+              : { lastViewedAt: state.lastViewed.occurredAt }),
+            ...(state.favoriteLevel === undefined
+              ? {}
+              : { favoriteLevel: state.favoriteLevel }),
+            postPositions: state.postPositions,
+          },
+        ]),
     );
   }
 
@@ -320,6 +330,8 @@ export class BbsSync {
       case "thread.viewed":
         assertPosition(input.position, true);
         return { ...threadBase, type: input.type, position: input.position };
+      case "thread.history.cleared":
+        return { ...threadBase, type: input.type };
       case "thread.response-count.observed":
         assertPosition(input.responseCount, true);
         return { ...threadBase, type: input.type, responseCount: input.responseCount };

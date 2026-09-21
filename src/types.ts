@@ -23,6 +23,13 @@ export interface SnapshotViewed {
   readonly eventId: string;
 }
 
+/** The latest marker that clears a thread from browsing history. */
+export interface SnapshotHistoryCleared {
+  readonly occurredAt: string;
+  readonly deviceId: string;
+  readonly eventId: string;
+}
+
 export interface SnapshotThreadMetadata {
   readonly title: string;
   readonly url: string;
@@ -37,6 +44,7 @@ export interface SnapshotThreadState {
   readonly lastReadPosition?: number;
   readonly responseCount?: number;
   readonly lastViewed?: SnapshotViewed;
+  readonly historyCleared?: SnapshotHistoryCleared;
   readonly favorite?: SnapshotFavorite;
   readonly postPositions: readonly number[];
 }
@@ -90,6 +98,10 @@ export interface ThreadViewedEvent extends BaseThreadEvent {
   readonly position: number;
 }
 
+export interface ThreadHistoryClearedEvent extends BaseThreadEvent {
+  readonly type: "thread.history.cleared";
+}
+
 export interface ThreadMetadataUpdatedEvent extends BaseThreadEvent {
   readonly v: typeof EVENT_SCHEMA_VERSION;
   readonly type: "thread.metadata.updated";
@@ -137,6 +149,7 @@ export interface FilterClearedEvent extends BaseEvent {
 export type SyncEvent =
   | ThreadMetadataUpdatedEvent
   | ThreadViewedEvent
+  | ThreadHistoryClearedEvent
   | ThreadResponseCountObservedEvent
   | FavoriteSetEvent
   | FavoriteClearedEvent
@@ -155,6 +168,10 @@ interface BaseThreadEventInput extends BaseEventInput {
 export interface ThreadViewedInput extends BaseThreadEventInput {
   readonly type: "thread.viewed";
   readonly position: number;
+}
+
+export interface ThreadHistoryClearedInput extends BaseThreadEventInput {
+  readonly type: "thread.history.cleared";
 }
 
 export interface ThreadMetadataUpdatedInput extends BaseThreadEventInput {
@@ -203,6 +220,7 @@ export interface FilterClearedInput extends BaseEventInput {
 export type SyncEventInput =
   | ThreadMetadataUpdatedInput
   | ThreadViewedInput
+  | ThreadHistoryClearedInput
   | ThreadResponseCountObservedInput
   | FavoriteSetInput
   | FavoriteClearedInput
@@ -246,4 +264,3 @@ export interface CompactOptions {
   /** Inactive thread retention period in milliseconds. Defaults to 30 days. */
   readonly retentionPeriodMs?: number;
 }
-

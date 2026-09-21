@@ -36,6 +36,8 @@ await sync.recordResponseCount("@5ch/software/1234567890", 130);
 await sync.setFavorite("@5ch/software/1234567890", 3);
 await sync.clearFavorite("@5ch/software/1234567890");
 await sync.recordPost("@5ch/software/1234567890", 126);
+// 閲覧履歴から削除する（削除操作も全端末へ同期される）
+await sync.clearThreadHistory("@5ch/software/1234567890");
 
 // フィルターは対象種別・対象文字列・表示効果を分けて同期する
 await sync.setFilter("@5ch/software", "ID", "ABCDEFG", "OMIT");
@@ -106,6 +108,7 @@ bbsync-data/
 - 閲覧位置: 最大の位置を採用
 - タイトル・URL: 一組として扱い、`occurredAt`が新しい更新を採用。同時刻の場合は端末IDとイベントIDで決定
 - 閲覧日時: `thread.viewed`の`occurredAt`が新しい日時を採用
+- 閲覧履歴削除: `thread.history.cleared`より前の閲覧位置・閲覧日時を無効化。削除後に再閲覧すると新しい履歴として復活
 - レス数: 端末間で観測した最大値を採用
 - お気に入り: 1〜5のレベルで管理。省略時はレベル1。`occurredAt`が新しい操作を採用し、同時刻の場合は端末IDとイベントIDで決定
 - 書き込み位置: 全端末の位置を重複なしで統合。スナップショット作成時（`compact()`）に全スレッドをまたいで最新1,000件（既定）を保持
@@ -113,6 +116,8 @@ bbsync-data/
 - セグメント: `maxEventsPerSegment`件で次のファイルへローテーション
 - フィルター: `scope`、`targetType`、`target`の組をキーに、`updatedAt`が新しい状態を採用。`effect`は対象の表示効果
 - スナップショット: 現在状態、お気に入り、フィルターの最終更新情報を端末別に保存。お気に入りや書き込みがなく、最終閲覧・更新から30日経過したスレッドはスナップショットから自動的に除外
+
+`clearThreadHistory()`は閲覧履歴の削除を記録します。削除イベントは対象が現在存在しなくても保存し、古いオフライン端末の閲覧履歴が同期後に復活しないようにします。お気に入りと書き込み位置は履歴削除の対象外です。
 
 `clearFavorite()`はお気に入り解除を記録します。解除後に古い端末のレベル設定が復活しないよう、解除も最終更新情報としてスナップショットへ保存されます。
 `clearFilter()`も同様に解除情報を保存します。

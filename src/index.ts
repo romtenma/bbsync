@@ -8,6 +8,7 @@ export {
   readProjectedFilters,
   readProjectedStates,
   snapshotFromStates,
+  isProjectedThreadStateVisible,
   type ProjectedFilterState,
   type ProjectedPostRecord,
   type ProjectedThreadState,
@@ -43,6 +44,7 @@ export {
   type SegmentRef,
   type SegmentCoverage,
   type SnapshotFavorite,
+  type SnapshotHistoryCleared,
   type SnapshotThreadState,
   type SnapshotThreadMetadata,
   type SnapshotViewed,
@@ -58,4 +60,6 @@ export {
   type ThreadResponseCountObservedInput,
   type ThreadViewedEvent,
   type ThreadViewedInput,
+  type ThreadHistoryClearedEvent,
+  type ThreadHistoryClearedInput,
 } from "./types.js";

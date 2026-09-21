@@ -6,6 +6,7 @@ import {
   type SnapshotThreadMetadata,
   type SnapshotViewed,
   type SnapshotFilter,
+  type SnapshotHistoryCleared,
   type StateSnapshot,
   type SyncEvent,
 } from "./types.js";
@@ -69,6 +70,8 @@ export function assertEvent(value: unknown): asserts value is SyncEvent {
       break;
     case "thread.viewed":
       assertPosition(event.position, true);
+      break;
+    case "thread.history.cleared":
       break;
     case "thread.response-count.observed":
       assertPosition(event.responseCount, true);
@@ -175,6 +178,9 @@ function assertSnapshotThread(value: unknown): void {
   if (thread.lastViewed !== undefined) {
     assertSnapshotViewed(thread.lastViewed);
   }
+  if (thread.historyCleared !== undefined) {
+    assertSnapshotHistoryCleared(thread.historyCleared);
+  }
   if (!Array.isArray(thread.postPositions) || thread.postPositions.some(
     (position) => !Number.isSafeInteger(position) || (position as number) < 1,
   )) {
@@ -256,6 +262,27 @@ function assertSnapshotViewed(value: unknown): asserts value is SnapshotViewed {
       throw new TypeError(`snapshot lastViewed.${field} must be a non-empty string`);
     }
     assertSafeComponent(viewed[field] as string, `snapshot lastViewed.${field}`);
+  }
+}
+
+function assertSnapshotHistoryCleared(
+  value: unknown,
+): asserts value is SnapshotHistoryCleared {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("snapshot historyCleared must be an object");
+  }
+  const cleared = value as Record<string, unknown>;
+  if (
+    typeof cleared.occurredAt !== "string" ||
+    Number.isNaN(Date.parse(cleared.occurredAt))
+  ) {
+    throw new TypeError("snapshot historyCleared.occurredAt must be a valid date-time string");
+  }
+  for (const field of ["deviceId", "eventId"] as const) {
+    if (typeof cleared[field] !== "string" || cleared[field].length === 0) {
+      throw new TypeError(`snapshot historyCleared.${field} must be a non-empty string`);
+    }
+    assertSafeComponent(cleared[field] as string, `snapshot historyCleared.${field}`);
   }
 }
 

@@ -26,6 +26,7 @@ v2 が同期する状態は次のとおりである。
 | --- | --- | --- |
 | スレッドタイトル・遷移先URL | `thread.metadata.updated` | `(occurredAt, deviceId, id)`の最新 |
 | 最終既読位置・最終閲覧日時 | `thread.viewed` | 位置は最大値、日時は最新イベント |
+| 閲覧履歴の削除マーカー | `thread.history.cleared` | `(occurredAt, deviceId, id)`の最新。これより前の閲覧状態を無効化 |
 | 観測済みレス数 | `thread.response-count.observed` | 最大値 |
 | お気に入りとレベル | `thread.favorite.set` / `thread.favorite.cleared` | 最終更新優先 |
 | 自分の書き込み位置 | `thread.post.recorded` | 集合の和 |
@@ -148,7 +149,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 | フィールド | 型 | 必須 | 意味 |
 | --- | --- | --- | --- |
-| `v` | integer | Yes | スキーマバージョン。v2 では常に `1` |
+| `v` | integer | Yes | スキーマバージョン。v2 では常に `2` |
 | `id` | string | Yes | イベントID |
 | `deviceId` | string | Yes | 発生元端末ID |
 | `occurredAt` | string | Yes | 操作が発生した日時 |
@@ -177,6 +178,22 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 ```json
 {"v":2,"id":"550e8400-e29b-41d4-a716-446655440001","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"5ch/software/1750000000","type":"thread.viewed","position":125}
+```
+
+### 7.1.1 `thread.history.cleared`
+
+端末から意図的にスレッドの閲覧履歴を削除したことを表す。削除イベント自体は対象スレッドが現在の射影に存在しなくても必ず保存する（MUST）。
+
+| フィールド | 型 | 制約 |
+| --- | --- | --- |
+| `threadId` | string | 5.3節の共通キー |
+
+同じ `threadId` の `thread.history.cleared` と履歴イベントを `(occurredAt, deviceId, id)` で比較する。削除マーカー以前の `thread.viewed` と `thread.response-count.observed` は射影から除外し、削除後の `thread.viewed` は新しい閲覧履歴として採用する。古いオフライン端末から削除前のイベントが後から届いても、履歴を復活させてはならない（MUST NOT）。
+
+お気に入りと書き込み位置は閲覧履歴とは独立しており、このイベントでは削除しない。履歴だけが残っていたスレッドは通常の状態一覧から除外する。お気に入りまたは書き込み位置が残る場合は、それらの状態を保持する。
+
+```json
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440009","deviceId":"desktop-main","occurredAt":"2026-09-20T01:30:00.000Z","threadId":"5ch/software/1750000000","type":"thread.history.cleared"}
 ```
 
 ### 7.2 `thread.response-count.observed`
@@ -326,9 +343,10 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | 射影フィールド | 統合規則 |
 | --- | --- |
 | `title`, `url` | 同じ`threadId`の`thread.metadata.updated`を`(occurredAt, deviceId, id)`で比較し、最大のイベントの組を採用 |
-| `lastReadPosition` | 同じ `threadId` の全 `thread.viewed.position` の最大値 |
-| `lastViewedAt` | `(occurredAt, deviceId, id)` が最大の `thread.viewed` の `occurredAt` |
-| `responseCount` | 同じ `threadId` の全 `responseCount` の最大値 |
+| `lastReadPosition` | 最新の `thread.history.cleared` より後に発生した `thread.viewed.position` の最大値 |
+| `lastViewedAt` | 最新の `thread.history.cleared` より後に発生し、`(occurredAt, deviceId, id)` が最大の `thread.viewed` の `occurredAt` |
+| 閲覧履歴削除 | `(occurredAt, deviceId, id)` が最大の `thread.history.cleared` より前の閲覧状態を無効化 |
+| `responseCount` | 最新の `thread.history.cleared` より後に発生した `responseCount` の最大値 |
 | `favoriteLevel` | 8.2節で勝ったイベントが `set` ならその `level`、`cleared` なら未設定 |
 | `postPositions` | 全 `thread.post.recorded.position` の重複なし昇順集合 |
 
@@ -371,6 +389,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | --- | --- |
 | スレッドを開く、またはタイトル・遷移先URLを取得・更新 | `thread.metadata.updated` |
 | スレッドを開く、または既読位置が進む | `thread.viewed` |
+| 利用者がスレッドの閲覧履歴を削除 | `thread.history.cleared` |
 | サーバーからレス一覧を取得し件数が判明 | `thread.response-count.observed` |
 | お気に入りを追加、またはレベルを変更 | `thread.favorite.set` |
 | お気に入りを解除 | `thread.favorite.cleared` |
@@ -415,6 +434,7 @@ v2 はベクトル時計やサーバー時刻による補正を定義しない�
 | --- | --- |
 | `thread.metadata.updated` | `setThreadMetadata(threadId, title, url)` |
 | `thread.viewed` | `recordThreadView(threadId, position)` |
+| `thread.history.cleared` | `clearThreadHistory(threadId)` |
 | `thread.response-count.observed` | `recordResponseCount(threadId, responseCount)` |
 | `thread.favorite.set` | `setFavorite(threadId, level)` |
 | `thread.favorite.cleared` | `clearFavorite(threadId)` |
@@ -459,7 +479,6 @@ await adapter.applyProjectedState({ threads, filters }, {
 - v2 のイベントは `v: 2` を必須とする。
 - 受信側は未対応のバージョンまたはイベント種別を黙って解釈してはならない。
 - 既存フィールドの意味、型、統合規則を変える変更は新しい `v` を必要とする。
-- 新しいイベント種別を追加するときは、古い実装がセグメント全体を読めなくなることを前提に、対応バージョンと移行手順を同時に定義する。
 - サイトプロファイルまたはフィルター対象の追加は、既存の意味を変えず識別子衝突がなければ仕様文書の後方互換な追加としてよい。
 
 ## 14. 適合チェックリスト
@@ -469,10 +488,11 @@ await adapter.applyProjectedState({ threads, filters }, {
 - [ ] `deviceId` を永続化し、プロファイル複製時に再生成する。
 - [ ] 同じ 5ch URLから `@5ch/<board>/<thread>` の同じキーを生成する。
 - [ ] レス番号はフィルター後の表示位置ではなく元の番号を使う。
-- [ ] 全8イベントを正しい制約で発火する。
+- [ ] 全9イベントを正しい制約で発火する。
 - [ ] 同期反映からイベントを再発火しない。
 - [ ] 同じ射影を複数回適用しても結果が変わらない。
 - [ ] お気に入り解除とフィルター解除を状態として保持する。
+- [ ] 閲覧履歴削除を状態として保持し、古いオフライン端末の履歴を復活させない。
 - [ ] 未対応のレベルやフィルターを勝手に変換・解除しない。
 - [ ] UTC の RFC 3339 日時を生成する。
 - [ ] オフラインの両端末で更新後、順不同で同期しても同じ射影状態になる。
