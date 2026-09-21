@@ -56,13 +56,15 @@ await sync.compact();
 
 shitaraba のように板キーに`/`を含むサイトでは、`/`を`.`に置換した値を板キーとして扱います。ただし、この変換は bbsync 本体では行わず、アダプター側で正規化してください。
 
-サイトキーをURLから作る場合は、`normalizeSiteKey()`を使用できます。規定サイトは`@5ch`、`@bbspink`、`@open2ch`、`@machi`、`@shitaraba`へ正規化され、サブドメインも同じキーになります。未知サイトは正規化したホスト名（サブドメインを含む）になります。
+サイトキーをURLから作る場合は、`normalizeSiteKey()`を使用できます。規定サイトは`@5ch`、`@bbspink`、`@open2ch`、`@machi`、`@shitaraba`、`@2chan`へ正規化され、サブドメインも同じキーになります。未知サイトは正規化したホスト名（サブドメインを含む）になります。
 
 ```ts
 import { normalizeSiteKey } from "@romtenma/bbsync";
 
 normalizeSiteKey("https://egg.5ch.net/test/read.cgi/software/123/");
 // "@5ch"
+normalizeSiteKey("https://may.2chan.net/b/");
+// "@2chan"
 normalizeSiteKey("https://sub.testtest.net/board/");
 // "sub.testtest.net"
 ```

@@ -105,6 +105,7 @@ v2 の規定サイトプロファイルは次のとおりである。ホスト�
 | `@open2ch` | `open2ch.net` |
 | `@machi` | `machi.to` |
 | `@shitaraba` | `shitaraba.net` |
+| `@2chan` | `2chan.net` |
 
 5ch の `board-key` と `thread-key` は次の規則で生成する。
 

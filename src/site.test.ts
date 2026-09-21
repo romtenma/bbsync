@@ -7,6 +7,8 @@ test("normalizes registered sites to their stable @ keys", () => {
   assert.equal(normalizeSiteKey("https://egg.5ch.net/test/read.cgi/software/123/"), "@5ch");
   assert.equal(normalizeSiteKey("https://5ch.io/"), "@5ch");
   assert.equal(normalizeSiteKey("https://WWW.2CH.NET."), "@5ch");
+  assert.equal(normalizeSiteKey("https://may.2chan.net/b/"), "@2chan");
+  assert.equal(normalizeSiteKey("https://IMG.2CHAN.NET."), "@2chan");
   assert.equal(normalizeSiteKey("https://sub.bbspink.com/"), "@bbspink");
   assert.equal(normalizeSiteKey("https://open2ch.net:443/"), "@open2ch");
   assert.equal(normalizeSiteKey("https://foo.machi.to/"), "@machi");
@@ -21,6 +23,8 @@ test("uses the normalized hostname, including subdomains, for unknown sites", ()
 test("does not match a registered site by an incomplete hostname label", () => {
   assert.equal(normalizeSiteKey("https://not5ch.net/"), "not5ch.net");
   assert.equal(normalizeSiteKey("https://5ch.net.example.org/"), "5ch.net.example.org");
+  assert.equal(normalizeSiteKey("https://not2chan.net/"), "not2chan.net");
+  assert.equal(normalizeSiteKey("https://2chan.net.example.org/"), "2chan.net.example.org");
 });
 
 test("normalizes hostname syntax before site lookup", () => {

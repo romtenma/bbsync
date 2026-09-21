@@ -16,6 +16,10 @@ export const KNOWN_SITE_PROFILES: readonly SiteProfile[] = Object.freeze([
     domains: Object.freeze(["5ch.net", "5ch.io", "2ch.net"]),
   }),
   Object.freeze({
+    siteKey: "@2chan",
+    domains: Object.freeze(["2chan.net"]),
+  }),
+  Object.freeze({
     siteKey: "@bbspink",
     domains: Object.freeze(["bbspink.com"]),
   }),
