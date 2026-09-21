@@ -175,6 +175,7 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
       targetType: "ID",
       target: "ABCDEFG",
       effect: "OMIT",
+      isRegex: false,
       updatedAt: "2026-09-20T00:00:04.000Z",
       hitAt: "2026-09-20T00:00:03.500Z",
     },
@@ -220,6 +221,16 @@ function sampleSnapshot(revision: number): StateSnapshot {
         }],
       },
     ],
-    filters: [],
+    filters: [{
+      scope: "egg.5ch.net/software",
+      targetType: "ID",
+      target: "ABCDEFG",
+      effect: "OMIT",
+      isRegex: false,
+      updatedAt: "2026-09-20T00:00:04.000Z",
+      cleared: false,
+      deviceId: "desktop",
+      eventId: "desktop-filter-set",
+    }],
   };
 }

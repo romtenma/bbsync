@@ -505,13 +505,20 @@ test("synchronizes filter targets, effects, timestamps, and scopes", async () =>
   const fixture = await createFixture();
   try {
     const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await desktop.addFilter("egg.5ch.net/software", "TEXT", "NGワード", "NOP", {
+    const normalEvent = await desktop.addFilter("egg.5ch.net/software", "TEXT", "NGワード", "NOP", {
       updatedAt: "2026-09-20T00:01:00.000Z",
       hitAt: "2026-09-20T00:00:30.000Z",
     });
-    await desktop.setFilter("egg.5ch.net/software", "ID", "ABCDEFG", "HIDE", {
+    assert.equal(normalEvent.type, "filter.set");
+    if (normalEvent.type !== "filter.set") throw new Error("expected filter.set");
+    assert.equal(normalEvent.isRegex, false);
+    const regexEvent = await desktop.setFilter("egg.5ch.net/software", "ID", "ABCDEFG", "HIDE", {
       updatedAt: "2026-09-20T00:02:00.000Z",
+      isRegex: true,
     });
+    assert.equal(regexEvent.type, "filter.set");
+    if (regexEvent.type !== "filter.set") throw new Error("expected filter.set");
+    assert.equal(regexEvent.isRegex, true);
     await desktop.addFilter("egg.5ch.net/news", "ID", "ABCDEFG", "HIGHLIGHT", {
       updatedAt: "2026-09-20T00:03:00.000Z",
     });
@@ -522,6 +529,7 @@ test("synchronizes filter targets, effects, timestamps, and scopes", async () =>
         targetType: "ID",
         target: "ABCDEFG",
         effect: "HIDE",
+        isRegex: true,
         updatedAt: "2026-09-20T00:02:00.000Z",
       },
       {
@@ -529,6 +537,7 @@ test("synchronizes filter targets, effects, timestamps, and scopes", async () =>
         targetType: "TEXT",
         target: "NGワード",
         effect: "NOP",
+        isRegex: false,
         updatedAt: "2026-09-20T00:01:00.000Z",
         hitAt: "2026-09-20T00:00:30.000Z",
       },

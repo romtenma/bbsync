@@ -57,6 +57,9 @@ export function assertEvent(value: unknown): asserts value is SyncEvent {
     assertFilterKey(event.scope, event.targetType, event.target);
     if (event.type === "filter.set") {
       assertFilterEffect(event.effect);
+      if (event.isRegex !== undefined && typeof event.isRegex !== "boolean") {
+        throw new TypeError("event.isRegex must be a boolean");
+      }
     }
     assertDateTime(event.updatedAt, "event.updatedAt");
     if (event.type === "filter.set" && event.hitAt !== undefined && event.hitAt !== null) {
@@ -319,6 +322,9 @@ function assertSnapshotFilter(value: unknown): void {
   const filter = value as Record<string, unknown>;
   assertFilterKey(filter.scope, filter.targetType, filter.target);
   assertFilterEffect(filter.effect, "snapshot filter");
+  if (filter.isRegex !== undefined && typeof filter.isRegex !== "boolean") {
+    throw new TypeError("snapshot filter.isRegex must be a boolean");
+  }
   assertDateTime(filter.updatedAt, "snapshot filter.updatedAt");
   if (filter.hitAt !== undefined) {
     assertDateTime(filter.hitAt, "snapshot filter.hitAt");

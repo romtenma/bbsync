@@ -45,7 +45,9 @@ await sync.setFilter("egg.5ch.net/software", "ID", "ABCDEFG", "OMIT");
 await sync.setFilter("egg.5ch.net/software", "SLIP", "xxxx-yyyy", "NOP", {
   hitAt: "2026-09-20T01:22:00.000Z",
 });
-await sync.setFilter("egg.5ch.net/software", "WORD", "NGワード", "HIGHLIGHT");
+await sync.setFilter("egg.5ch.net/software", "WORD", "^NG.*", "HIGHLIGHT", {
+  isRegex: true,
+});
 const filters = await sync.getFilters("egg.5ch.net/software");
 await sync.clearFilter("egg.5ch.net/software", "ID", "ABCDEFG");
 
@@ -76,7 +78,7 @@ normalizeHostname("https://sub.testtest.net/board/");
 
 フィルターは、`scope`、`targetType`、`target`の組で対象を識別し、`effect`で一致時の表示効果を指定します。`targetType`と`effect`の値は専用ブラウザが定義します。推奨値の例は、`targetType`が`ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD`、`effect`が`OMIT`、`NOP`、`HIGHLIGHT`です。`scope`には`egg.5ch.net/software`のようなサーバー・板キーを指定します。
 
-フィルター情報には必須の`updatedAt`と、条件がスレッド内に現れた日時を表す任意の`hitAt`があります。`updatedAt`を省略した場合はローカル時計から自動設定されます。解除も同期され、古いオフライン端末の更新によって復活しないように扱われます。
+フィルター情報には必須の`updatedAt`と、条件がスレッド内に現れた日時を表す任意の`hitAt`があります。`isRegex`を`true`にすると`target`を正規表現として扱い、省略時または`false`の場合は通常の一致として扱います。`updatedAt`を省略した場合はローカル時計から自動設定されます。解除も同期され、古いオフライン端末の更新によって復活しないように扱われます。
 
 ## 同期
 
@@ -103,7 +105,7 @@ bbsync-data/
 ```json
 {"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:40.000Z","threadId":"egg.5ch.net/software/1234567890","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1234567890/"}
 {"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"egg.5ch.net/software/1234567890","type":"thread.viewed","position":125}
-{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"filter.set","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
+{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"filter.set","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","isRegex":false,"updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
 ```
 
 ## 統合規則
@@ -117,7 +119,7 @@ bbsync-data/
 - 書き込み位置: 位置ごとに `thread.post.recorded` と `thread.post.cleared` の新しい方を採用。削除マーカーはスナップショットにも保持し、古いオフライン端末の位置が復活しないようにする。スナップショット作成時（`compact()`）に有効な位置を全スレッドをまたいで最新1,000件（既定）まで保持
 - イベント: イベントIDで重複排除。同じIDで内容が異なる場合はエラー
 - セグメント: `maxEventsPerSegment`件で次のファイルへローテーション
-- フィルター: `scope`、`targetType`、`target`の組をキーに、`updatedAt`が新しい状態を採用。`effect`は対象の表示効果
+- フィルター: `scope`、`targetType`、`target`の組をキーに、`updatedAt`が新しい状態を採用。`effect`は対象の表示効果、`isRegex`は正規表現として扱うかどうかを表す（省略時は`false`）
 - スナップショット: 現在状態、お気に入り、フィルターの最終更新情報を端末別に保存。お気に入りや書き込みがなく、最終閲覧・更新から30日経過したスレッドはスナップショットから自動的に除外
 
 `clearThreadHistory()`は閲覧履歴の削除を記録します。削除イベントは対象が現在存在しなくても保存し、古いオフライン端末の閲覧履歴が同期後に復活しないようにします。お気に入りと書き込み位置は履歴削除の対象外です。

@@ -147,7 +147,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 すべての整数は JavaScript の安全な整数範囲内でなければならない。`NaN`、`Infinity`、小数、数値を表す文字列は無効である。
 
-異なる言語の実装間でイベントを安定して複製できるよう、イベントは生成後に再構成せず、元のフィールドと値を保持する（MUST）。新規生成時のフィールド順は、共通フィールド、`threadId`、`type`、種別固有フィールドの順を推奨する。フィルターイベントは共通フィールド、`type`、`scope`、`targetType`、`target`、`effect`、日時フィールドの順とする。
+異なる言語の実装間でイベントを安定して複製できるよう、イベントは生成後に再構成せず、元のフィールドと値を保持する（MUST）。新規生成時のフィールド順は、共通フィールド、`threadId`、`type`、種別固有フィールドの順を推奨する。フィルターイベントは共通フィールド、`type`、`scope`、`targetType`、`target`、`effect`、`isRegex`、日時フィールドの順とする。
 
 ## 7. イベント種別
 
@@ -271,7 +271,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 ### 7.8 `filter.set`
 
-フィルターを設定する。フィルターは `scope`、`targetType`、`target` の組で識別し、`effect` で一致時の表示効果を指定する。
+フィルターを設定する。フィルターは `scope`、`targetType`、`target` の組で識別し、`effect` で一致時の表示効果を指定する。`isRegex` が `true` の場合は `target` を正規表現として扱い、省略または `false` の場合は通常の一致として扱う。
 
 | フィールド | 型 | 必須 | 制約・意味 |
 | --- | --- | --- | --- |
@@ -279,13 +279,14 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `targetType` | string | Yes | 専用ブラウザが定義する対象の種類。推奨値の例: `ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD` |
 | `target` | string | Yes | 対象の文字列。空は禁止 |
 | `effect` | string | Yes | 専用ブラウザが定義する一致時の表示効果。推奨値の例: `OMIT`、`NOP`、`HIGHLIGHT` |
+| `isRegex` | boolean | No | `true` なら `target` を正規表現として扱う。省略時は `false` |
 | `updatedAt` | string | Yes | このフィルターの意味上の更新日時 |
 | `hitAt` | string または `null` | No | 条件がスレッド内で最後に検出された日時 |
 
-同じ `(scope, targetType, target)` に新しい `effect` を設定した場合は、同じフィルターの表示効果を更新する。`updatedAt` は競合解決に使われ、通常は `occurredAt` と同じ値にする。
+同じ `(scope, targetType, target)` に新しい `effect` または `isRegex` を設定した場合は、同じフィルターの表示条件と表示効果を更新する。`updatedAt` は競合解決に使われ、通常は `occurredAt` と同じ値にする。
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440006","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","type":"filter.set","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","updatedAt":"2026-09-20T01:28:00.000Z","hitAt":"2026-09-20T01:27:59.000Z"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440006","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","type":"filter.set","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","isRegex":false,"updatedAt":"2026-09-20T01:28:00.000Z","hitAt":"2026-09-20T01:27:59.000Z"}
 ```
 
 ### 7.9 `filter.cleared`
@@ -295,7 +296,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | フィールド | 型 | 制約 |
 | --- | --- | --- |
 | `scope` | string | 5.4節の共通キー |
-| `targetType` | string | 解除対象の種類。値は専用ブラウザが定義する。推奨値の例: `ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`NAME`、`MAIL`、`TRIP`、`URL`、`IMGHASH`、`WORD` |
+| `targetType` | string | 解除対象の種類。値は専用ブラウザが定義する。推奨値の例: `ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`NAME`、`MAIL`、`TRIP`、`URL`、`WORD` |
 | `target` | string | 解除対象と完全一致 |
 | `updatedAt` | string | 意味上の更新日時 |
 
@@ -319,6 +320,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `URL`  | プロトコルを抜いたURLとの一致 | 専用ブラウザの仕様による |
 | `IMGHASH` | 画像のハッシュ値 | 専用ブラウザの仕様による |
 | `WORD` | 本文に含まれる文字列との一致 | Unicode NFC、文字列一致 |
+| `TITLE` | スレッドタイトルに含まれる文字列との一致 | Unicode NFC、文字列一致 |
 
 `effect`の値も専用ブラウザが定義する。以下は推奨値の例であり、これらに限定されない。
 
@@ -442,7 +444,7 @@ v2 はベクトル時計やサーバー時刻による補正を定義しない�
 | `thread.favorite.cleared` | `clearFavorite(threadId)` |
 | `thread.post.recorded` | `recordPost(threadId, position)` |
 | `thread.post.cleared` | `clearPost(threadId, position)` |
-| `filter.set` | `setFilter(scope, targetType, target, effect, options)` |
+| `filter.set` | `setFilter(scope, targetType, target, effect, options)`。`options.isRegex` は省略時 `false` |
 | `filter.cleared` | `clearFilter(scope, targetType, target, options)` |
 
 履歴日時を明示する初回インポートや複数イベントの一括追加には `append(inputs)` を使用する。永続化済みイベントの `v`、`id`、`deviceId` はコアが付与する。

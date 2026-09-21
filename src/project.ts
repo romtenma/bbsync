@@ -229,6 +229,7 @@ export function snapshotFromStates(
         targetType: filter.targetType,
         target: filter.target,
         effect: filter.effect,
+        isRegex: filter.isRegex,
         updatedAt: filter.updatedAt,
         ...(filter.hitAt === undefined ? {} : { hitAt: filter.hitAt }),
         cleared: filter.cleared,
@@ -248,7 +249,7 @@ export function projectFilterStates(
     const key = filterKey(seed.scope, seed.targetType, seed.target);
     const current = states.get(key);
     if (current === undefined || compareFilterStates(current, seed) < 0) {
-      states.set(key, { ...seed });
+      states.set(key, { ...seed, isRegex: seed.isRegex === true });
     }
   }
 
@@ -260,6 +261,7 @@ export function projectFilterStates(
           targetType: event.targetType,
           target: event.target,
           effect: event.effect,
+          isRegex: event.isRegex === true,
           updatedAt: event.updatedAt,
           ...(event.hitAt === undefined || event.hitAt === null
             ? {}
@@ -273,6 +275,7 @@ export function projectFilterStates(
           targetType: event.targetType,
           target: event.target,
           effect: "OMIT",
+          isRegex: false,
           updatedAt: event.updatedAt,
           cleared: true,
           deviceId: event.deviceId,

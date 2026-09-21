@@ -70,6 +70,8 @@ export interface SnapshotFilter {
   readonly targetType: FilterTargetType;
   readonly target: string;
   readonly effect: FilterEffect;
+  /** Whether target is interpreted as a regular expression. Omitted means false. */
+  readonly isRegex?: boolean;
   readonly updatedAt: string;
   readonly hitAt?: string;
   readonly cleared: boolean;
@@ -149,6 +151,8 @@ export interface FilterSetEvent extends BaseEvent {
   readonly targetType: FilterTargetType;
   readonly target: string;
   readonly effect: FilterEffect;
+  /** Whether target is interpreted as a regular expression. Omitted means false. */
+  readonly isRegex?: boolean;
   readonly updatedAt: string;
   readonly hitAt?: string | null;
 }
@@ -226,6 +230,7 @@ export interface FilterSetInput extends BaseEventInput {
   readonly targetType: FilterTargetType;
   readonly target: string;
   readonly effect: FilterEffect;
+  readonly isRegex?: boolean;
   readonly updatedAt?: string;
   readonly hitAt?: string | null;
 }
@@ -255,6 +260,7 @@ export interface FilterEntry {
   readonly targetType: FilterTargetType;
   readonly target: string;
   readonly effect: FilterEffect;
+  readonly isRegex: boolean;
   readonly updatedAt: string;
   readonly hitAt?: string;
 }

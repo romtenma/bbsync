@@ -133,7 +133,11 @@ export class BbsSync {
     targetType: FilterTargetType,
     target: string,
     effect: FilterEffect,
-    options: { readonly updatedAt?: string; readonly hitAt?: string | null } = {},
+    options: {
+      readonly updatedAt?: string;
+      readonly hitAt?: string | null;
+      readonly isRegex?: boolean;
+    } = {},
   ): Promise<SyncEvent> {
     const [event] = await this.append([{
       type: "filter.set",
@@ -141,6 +145,7 @@ export class BbsSync {
       targetType,
       target,
       effect,
+      ...(options.isRegex === undefined ? {} : { isRegex: options.isRegex }),
       ...(options.updatedAt === undefined ? {} : { updatedAt: options.updatedAt }),
       ...(options.hitAt === undefined ? {} : { hitAt: options.hitAt }),
     }]);
@@ -152,7 +157,11 @@ export class BbsSync {
     targetType: FilterTargetType,
     target: string,
     effect: FilterEffect,
-    options: { readonly updatedAt?: string; readonly hitAt?: string | null } = {},
+    options: {
+      readonly updatedAt?: string;
+      readonly hitAt?: string | null;
+      readonly isRegex?: boolean;
+    } = {},
   ): Promise<SyncEvent> {
     return this.addFilter(scope, targetType, target, effect, options);
   }
@@ -191,6 +200,7 @@ export class BbsSync {
         targetType: filter.targetType,
         target: filter.target,
         effect: filter.effect,
+        isRegex: filter.isRegex,
         updatedAt: filter.updatedAt,
         ...(filter.hitAt === undefined ? {} : { hitAt: filter.hitAt }),
       }));
@@ -280,6 +290,9 @@ export class BbsSync {
       case "filter.set": {
         assertFilterKey(input.scope, input.targetType, input.target);
         assertFilterEffect(input.effect);
+        if (input.isRegex !== undefined && typeof input.isRegex !== "boolean") {
+          throw new TypeError("filter isRegex must be a boolean");
+        }
         const updatedAt = input.updatedAt ?? occurredAt;
         assertDateTime(updatedAt, "updatedAt");
         if (input.hitAt !== undefined && input.hitAt !== null) {
@@ -292,6 +305,7 @@ export class BbsSync {
           targetType: input.targetType,
           target: input.target,
           effect: input.effect,
+          isRegex: input.isRegex ?? false,
           updatedAt,
           ...(input.hitAt === undefined ? {} : { hitAt: input.hitAt }),
         };
