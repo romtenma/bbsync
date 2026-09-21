@@ -262,7 +262,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `scope` | string | Yes | 5.4節の共通キー |
 | `targetType` | string | Yes | 専用ブラウザが定義する対象の種類。推奨値の例: `ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD` |
 | `target` | string | Yes | 対象の文字列。空は禁止 |
-| `effect` | string | Yes | 専用ブラウザが定義する一致時の表示効果。推奨値の例: `OMIT`、`TRANSPARENT`、`HIGHLIGHT` |
+| `effect` | string | Yes | 専用ブラウザが定義する一致時の表示効果。推奨値の例: `OMIT`、`NOP`、`HIGHLIGHT` |
 | `updatedAt` | string | Yes | このフィルターの意味上の更新日時 |
 | `hitAt` | string または `null` | No | 条件がスレッド内で最後に検出された日時 |
 
@@ -309,7 +309,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `effect` | 意味 |
 | --- | --- |
 | `OMIT` | 目立たない表示 |
-| `TRANSPARENT` | 完全に非表示 |
+| `NOP` | 完全に非表示 |
 | `HIGHLIGHT` | 強調表示 |
 
 ### 7.10 `effect` の解釈

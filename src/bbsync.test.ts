@@ -355,7 +355,7 @@ test("synchronizes filter targets, effects, timestamps, and scopes", async () =>
   const fixture = await createFixture();
   try {
     const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await desktop.addFilter("5ch/software", "TEXT", "NGワード", "TRANSPARENT", {
+    await desktop.addFilter("5ch/software", "TEXT", "NGワード", "NOP", {
       updatedAt: "2026-09-20T00:01:00.000Z",
       hitAt: "2026-09-20T00:00:30.000Z",
     });
@@ -378,7 +378,7 @@ test("synchronizes filter targets, effects, timestamps, and scopes", async () =>
         scope: "5ch/software",
         targetType: "TEXT",
         target: "NGワード",
-        effect: "TRANSPARENT",
+        effect: "NOP",
         updatedAt: "2026-09-20T00:01:00.000Z",
         hitAt: "2026-09-20T00:00:30.000Z",
       },

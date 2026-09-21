@@ -39,7 +39,7 @@ await sync.recordPost("@5ch/software/1234567890", 126);
 
 // フィルターは対象種別・対象文字列・表示効果を分けて同期する
 await sync.setFilter("@5ch/software", "ID", "ABCDEFG", "OMIT");
-await sync.setFilter("@5ch/software", "SLIP", "xxxx-yyyy", "TRANSPARENT", {
+await sync.setFilter("@5ch/software", "SLIP", "xxxx-yyyy", "NOP", {
   hitAt: "2026-09-20T01:22:00.000Z",
 });
 await sync.setFilter("@5ch/software", "WORD", "NGワード", "HIGHLIGHT");
@@ -67,7 +67,7 @@ normalizeSiteKey("https://sub.testtest.net/board/");
 // "sub.testtest.net"
 ```
 
-フィルターは、`scope`、`targetType`、`target`の組で対象を識別し、`effect`で一致時の表示効果を指定します。`targetType`と`effect`の値は専用ブラウザが定義します。推奨値の例は、`targetType`が`ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD`、`effect`が`OMIT`、`TRANSPARENT`、`HIGHLIGHT`です。`scope`には`@5ch/software`のようなサイト・板キーを指定します。
+フィルターは、`scope`、`targetType`、`target`の組で対象を識別し、`effect`で一致時の表示効果を指定します。`targetType`と`effect`の値は専用ブラウザが定義します。推奨値の例は、`targetType`が`ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD`、`effect`が`OMIT`、`NOP`、`HIGHLIGHT`です。`scope`には`@5ch/software`のようなサイト・板キーを指定します。
 
 フィルター情報には必須の`updatedAt`と、条件がスレッド内に現れた日時を表す任意の`hitAt`があります。`updatedAt`を省略した場合はローカル時計から自動設定されます。解除も同期され、古いオフライン端末の更新によって復活しないように扱われます。
 
