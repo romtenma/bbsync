@@ -155,19 +155,19 @@ test("syncs thread title and URL without changing the thread key", async () => {
     const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:01:00Z");
 
     const event = await desktop.setThreadMetadata(
-      "@5ch/software/1234567890",
+      "egg.5ch.net/software/1234567890",
       "最初のタイトル",
       "https://egg.5ch.net/test/read.cgi/software/1234567890/",
     );
     assert.equal(event.v, 2);
     assert.equal(event.type, "thread.metadata.updated");
-    assert.equal(event.threadId, "@5ch/software/1234567890");
+    assert.equal(event.threadId, "egg.5ch.net/software/1234567890");
 
     await desktop.synchronizeWith(mobile.storage);
     assert.deepEqual(
-      await mobile.getThreadState("@5ch/software/1234567890"),
+      await mobile.getThreadState("egg.5ch.net/software/1234567890"),
       {
-        threadId: "@5ch/software/1234567890",
+        threadId: "egg.5ch.net/software/1234567890",
         title: "最初のタイトル",
         url: "https://egg.5ch.net/test/read.cgi/software/1234567890/",
         postPositions: [],
@@ -175,20 +175,20 @@ test("syncs thread title and URL without changing the thread key", async () => {
     );
 
     await mobile.setThreadMetadata(
-      "@5ch/software/1234567890",
+      "egg.5ch.net/software/1234567890",
       "更新後のタイトル",
-      "https://itest.5ch.net/test/read.cgi/software/1234567890/",
+      "https://egg.5ch.net/test/read.cgi/software/1234567890/",
     );
     await desktop.synchronizeWith(mobile.storage);
 
     const expected = {
-      threadId: "@5ch/software/1234567890",
+      threadId: "egg.5ch.net/software/1234567890",
       title: "更新後のタイトル",
-      url: "https://itest.5ch.net/test/read.cgi/software/1234567890/",
+      url: "https://egg.5ch.net/test/read.cgi/software/1234567890/",
       postPositions: [],
     };
-    assert.deepEqual(await desktop.getThreadState("@5ch/software/1234567890"), expected);
-    assert.deepEqual(await mobile.getThreadState("@5ch/software/1234567890"), expected);
+    assert.deepEqual(await desktop.getThreadState("egg.5ch.net/software/1234567890"), expected);
+    assert.deepEqual(await mobile.getThreadState("egg.5ch.net/software/1234567890"), expected);
   } finally {
     await fixture.cleanup();
   }
@@ -456,27 +456,27 @@ test("synchronizes filter targets, effects, timestamps, and scopes", async () =>
   const fixture = await createFixture();
   try {
     const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await desktop.addFilter("5ch/software", "TEXT", "NGワード", "NOP", {
+    await desktop.addFilter("egg.5ch.net/software", "TEXT", "NGワード", "NOP", {
       updatedAt: "2026-09-20T00:01:00.000Z",
       hitAt: "2026-09-20T00:00:30.000Z",
     });
-    await desktop.setFilter("5ch/software", "ID", "ABCDEFG", "HIDE", {
+    await desktop.setFilter("egg.5ch.net/software", "ID", "ABCDEFG", "HIDE", {
       updatedAt: "2026-09-20T00:02:00.000Z",
     });
-    await desktop.addFilter("5ch/news", "ID", "ABCDEFG", "HIGHLIGHT", {
+    await desktop.addFilter("egg.5ch.net/news", "ID", "ABCDEFG", "HIGHLIGHT", {
       updatedAt: "2026-09-20T00:03:00.000Z",
     });
 
-    assert.deepEqual(await desktop.getFilters("5ch/software"), [
+    assert.deepEqual(await desktop.getFilters("egg.5ch.net/software"), [
       {
-        scope: "5ch/software",
+        scope: "egg.5ch.net/software",
         targetType: "ID",
         target: "ABCDEFG",
         effect: "HIDE",
         updatedAt: "2026-09-20T00:02:00.000Z",
       },
       {
-        scope: "5ch/software",
+        scope: "egg.5ch.net/software",
         targetType: "TEXT",
         target: "NGワード",
         effect: "NOP",
@@ -500,14 +500,14 @@ test("keeps a newer filter removal over an older offline update after compaction
   try {
     const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
     const offline = createSync(fixture.right, "mobile", "2026-09-19T00:00:00Z");
-    await desktop.addFilter("5ch/software", "ID", "ABCDEFG", "HIDE", {
+    await desktop.addFilter("egg.5ch.net/software", "ID", "ABCDEFG", "HIDE", {
       updatedAt: "2026-09-20T00:00:00.000Z",
     });
-    await desktop.clearFilter("5ch/software", "ID", "ABCDEFG", {
+    await desktop.clearFilter("egg.5ch.net/software", "ID", "ABCDEFG", {
       updatedAt: "2026-09-20T00:01:00.000Z",
     });
     await desktop.compact();
-    await offline.addFilter("5ch/software", "ID", "ABCDEFG", "HIDE", {
+    await offline.addFilter("egg.5ch.net/software", "ID", "ABCDEFG", "HIDE", {
       updatedAt: "2026-09-19T23:00:00.000Z",
       hitAt: "2026-09-19T22:59:00.000Z",
     });
@@ -550,7 +550,7 @@ test("uses locale-independent ordinal tie-breaks", () => {
       deviceId: "device-a",
       occurredAt,
       type: "filter.set",
-      scope: "5ch/software",
+      scope: "egg.5ch.net/software",
       targetType: "ID",
       target: "ABCDEFG",
       effect: "HIDE",
@@ -562,7 +562,7 @@ test("uses locale-independent ordinal tie-breaks", () => {
       deviceId: "device_a",
       occurredAt,
       type: "filter.cleared",
-      scope: "5ch/software",
+      scope: "egg.5ch.net/software",
       targetType: "ID",
       target: "ABCDEFG",
       updatedAt: occurredAt,

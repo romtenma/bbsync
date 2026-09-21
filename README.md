@@ -26,52 +26,54 @@ const sync = new BbsSync({
   deviceId: "desktop-main",
 });
 
-await sync.recordThreadView("@5ch/software/1234567890", 125);
+await sync.recordThreadView("egg.5ch.net/software/1234567890", 125);
 await sync.setThreadMetadata(
-  "@5ch/software/1234567890",
+  "egg.5ch.net/software/1234567890",
   "ソフトウェア板のスレッド",
   "https://egg.5ch.net/test/read.cgi/software/1234567890/",
 );
-await sync.recordResponseCount("@5ch/software/1234567890", 130);
-await sync.setFavorite("@5ch/software/1234567890", 3);
-await sync.clearFavorite("@5ch/software/1234567890");
-await sync.recordPost("@5ch/software/1234567890", 126);
+await sync.recordResponseCount("egg.5ch.net/software/1234567890", 130);
+await sync.setFavorite("egg.5ch.net/software/1234567890", 3);
+await sync.clearFavorite("egg.5ch.net/software/1234567890");
+await sync.recordPost("egg.5ch.net/software/1234567890", 126);
 // 閲覧履歴から削除する（削除操作も全端末へ同期される）
-await sync.clearThreadHistory("@5ch/software/1234567890");
+await sync.clearThreadHistory("egg.5ch.net/software/1234567890");
 
 // フィルターは対象種別・対象文字列・表示効果を分けて同期する
-await sync.setFilter("@5ch/software", "ID", "ABCDEFG", "OMIT");
-await sync.setFilter("@5ch/software", "SLIP", "xxxx-yyyy", "NOP", {
+await sync.setFilter("egg.5ch.net/software", "ID", "ABCDEFG", "OMIT");
+await sync.setFilter("egg.5ch.net/software", "SLIP", "xxxx-yyyy", "NOP", {
   hitAt: "2026-09-20T01:22:00.000Z",
 });
-await sync.setFilter("@5ch/software", "WORD", "NGワード", "HIGHLIGHT");
-const filters = await sync.getFilters("@5ch/software");
-await sync.clearFilter("@5ch/software", "ID", "ABCDEFG");
+await sync.setFilter("egg.5ch.net/software", "WORD", "NGワード", "HIGHLIGHT");
+const filters = await sync.getFilters("egg.5ch.net/software");
+await sync.clearFilter("egg.5ch.net/software", "ID", "ABCDEFG");
 
-const state = await sync.getThreadState("@5ch/software/1234567890");
+const state = await sync.getThreadState("egg.5ch.net/software/1234567890");
 
 // 現在状態をスナップショット化し、古い自端末セグメントを整理する
 await sync.compact();
 ```
 
-`threadId`はこのモジュールにとって不透明な文字列です。タイトルやURLはキーに使いません。URLやクライアント内部のキーをどのように正規化して`threadId`にするかはアダプター側で決定します。
+`threadId`はこのモジュールにとって不透明な文字列です。タイトルやURLはキーに使いません。アダプターはサーバーを含む識別子を生成し、ホスト名を小文字化し、末尾のドットを除去した値を使用してください。
 
 shitaraba のように板キーに`/`を含むサイトでは、`/`を`.`に置換した値を板キーとして扱います。ただし、この変換は bbsync 本体では行わず、アダプター側で正規化してください。
 
-サイトキーをURLから作る場合は、`normalizeSiteKey()`を使用できます。規定サイトは`@5ch`、`@bbspink`、`@open2ch`、`@machi`、`@shitaraba`、`@2chan`へ正規化され、サブドメインも同じキーになります。未知サイトは正規化したホスト名（サブドメインを含む）になります。
+サーバー名をURLから取り出す場合は、`normalizeHostname()`を使用できます。返されたホスト名をそのまま`threadId`や`scope`のサーバー部分に使用します。サブドメインもそのまま保持されるため、サーバー移転前後の識別子を誤って統合しません。
 
 ```ts
-import { normalizeSiteKey } from "@romtenma/bbsync";
+import { normalizeHostname } from "@romtenma/bbsync";
 
-normalizeSiteKey("https://egg.5ch.net/test/read.cgi/software/123/");
-// "@5ch"
-normalizeSiteKey("https://may.2chan.net/b/");
-// "@2chan"
-normalizeSiteKey("https://sub.testtest.net/board/");
+normalizeHostname("https://egg.5ch.net/test/read.cgi/software/123/");
+// "egg.5ch.net"
+normalizeHostname("https://may.2chan.net/b/");
+// "may.2chan.net"
+normalizeHostname("https://sub.testtest.net/board/");
 // "sub.testtest.net"
 ```
 
-フィルターは、`scope`、`targetType`、`target`の組で対象を識別し、`effect`で一致時の表示効果を指定します。`targetType`と`effect`の値は専用ブラウザが定義します。推奨値の例は、`targetType`が`ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD`、`effect`が`OMIT`、`NOP`、`HIGHLIGHT`です。`scope`には`@5ch/software`のようなサイト・板キーを指定します。
+既に保存済みの旧形式イベントの`threadId`と`scope`は自動変換されません。既存データを移行する場合は、メタデータのURLなどからサーバー名を確定したうえで、関連するイベントをまとめて変換してください。サーバー名を確定できないデータは自動移行の対象外です。
+
+フィルターは、`scope`、`targetType`、`target`の組で対象を識別し、`effect`で一致時の表示効果を指定します。`targetType`と`effect`の値は専用ブラウザが定義します。推奨値の例は、`targetType`が`ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD`、`effect`が`OMIT`、`NOP`、`HIGHLIGHT`です。`scope`には`egg.5ch.net/software`のようなサーバー・板キーを指定します。
 
 フィルター情報には必須の`updatedAt`と、条件がスレッド内に現れた日時を表す任意の`hitAt`があります。`updatedAt`を省略した場合はローカル時計から自動設定されます。解除も同期され、古いオフライン端末の更新によって復活しないように扱われます。
 
@@ -98,9 +100,9 @@ bbsync-data/
 各行はバージョン付きイベントです。
 
 ```json
-{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:40.000Z","threadId":"@5ch/software/1234567890","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1234567890/"}
-{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"@5ch/software/1234567890","type":"thread.viewed","position":125}
-{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"filter.set","scope":"@5ch/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
+{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:40.000Z","threadId":"egg.5ch.net/software/1234567890","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1234567890/"}
+{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"egg.5ch.net/software/1234567890","type":"thread.viewed","position":125}
+{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"filter.set","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
 ```
 
 ## 統合規則

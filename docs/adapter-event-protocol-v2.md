@@ -40,7 +40,7 @@ v2 が同期する状態は次のとおりである。
 - **端末**: 1つのブラウザープロファイルまたはアプリケーションインストール。1つの永続的な `deviceId` を持つ。
 - **イベント**: 端末で起きた状態変更を表す、不変な JSON オブジェクト。
 - **射影状態**: すべてのイベントとスナップショットを統合して得られる現在状態。
-- **サイトプロファイル**: URL、板、スレッド、フィルター対象を共通キーへ正規化するサイト別規則。
+- **サーバーキー**: URL のホスト名を正規化した値。スレッドとフィルターの識別子にそのまま使用する。
 - **ローカル操作**: 利用者またはブラウザ自身が発生させた変更。
 - **同期反映**: bbsync から取得した射影状態をブラウザへ適用する変更。
 
@@ -88,25 +88,13 @@ UUID、またはアプリ名とUUIDを組み合わせた値を推奨する。表
 異なるアダプターが同じスレッドに同じ `threadId` を生成することは、相互運用の必須条件である。
 
 ```text
-<site-key>/<board-key>/<thread-key>
+<server-key>/<board-key>/<thread-key>
 ```
 
-- `site-key` はサイトプロファイルで定義された固定値とする。規定サイトのキーは `@` で始める。
+- `server-key` は URL のホスト名を小文字化し、末尾のドットを除去した値をそのまま使用する。サイト別の固定キーやエイリアスは定義しない。
 - `board-key` と `thread-key` は表示名ではなく、サイト上で永続的な識別子を使用する。
-- URL のホスト名、スキーム、クエリ、フラグメント、末尾スラッシュをそのままキーにしてはならない。
-- 大文字小文字、Unicode 正規化、URL エンコード、旧ドメインやミラーの扱いはサイトプロファイルに従う。
-- 未知のサイトについて、アダプター独自のキーを既存の `site-key` として発行してはならない。未知のサイトは正規化したホスト名（サブドメインを含む）を `site-key` とする。
-
-v2 の規定サイトプロファイルは次のとおりである。ホスト名が一致する場合と、指定ホストのサブドメインである場合に同じキーへ正規化する。
-
-| `site-key` | ドメイン |
-| --- | --- |
-| `@5ch` | `5ch.net`, `5ch.io`, `2ch.net` |
-| `@bbspink` | `bbspink.com` |
-| `@open2ch` | `open2ch.net` |
-| `@machi` | `machi.to` |
-| `@shitaraba` | `shitaraba.net` |
-| `@2chan` | `2chan.net` |
+- URL のスキーム、ポート、パス、クエリ、フラグメントはキーに含めない。
+- 大文字小文字、末尾ドットの扱いは共通のホスト名正規化規則に従う。サブドメイン、旧ドメイン、ミラーはそれぞれ別の `server-key` とする。
 
 5ch の `board-key` と `thread-key` は次の規則で生成する。
 
@@ -114,7 +102,7 @@ v2 の規定サイトプロファイルは次のとおりである。ホスト�
 | --- | --- |
 | `board-key` | `test/read.cgi/` の直後にある板キーをそのまま使用 |
 | `thread-key` | その次にある数字のスレッドキー。先頭のゼロは除去 |
-| サーバー名 | 使用しない。サーバー移転前後で同じキーにする |
+| サーバー名 | URL のホスト名を正規化して `server-key` として使用 |
 
 shitaraba のように `board-key` に `/` を含むサイトでは、`/` を `.` に置換した値を `board-key` として扱う。これはアダプター側で正規化する前提であり、bbsync 本体はこの変換を行わない。
 
@@ -122,22 +110,22 @@ shitaraba のように `board-key` に `/` を含むサイトでは、`/` を `.
 
 ```text
 https://egg.5ch.net/test/read.cgi/software/1750000000/
-→ @5ch/software/1750000000
+→ egg.5ch.net/software/1750000000
 ```
 
-URL 以外の内部データから生成する場合も同じ結果にならなければならない。5ch 以外のサイトを相互運用対象に加える場合は、実装前にこの節へサイトプロファイルを追加する。
+URL 以外の内部データから生成する場合も同じ結果にならなければならない。復元時は `server-key` をそのままサーバー名として使用できる。
 
-ホスト名は小文字化し、末尾のドットを除去する。スキーム、ポート、パス、クエリ、フラグメントはキーに含めない。未知のサイトではサブドメインも残す。例えば `https://sub.testtest.net/board/` は `sub.testtest.net` を `site-key` とする。既知サイトの判定はDNSラベル境界で行い、`not5ch.net`を`@5ch`として扱ってはならない。
+ホスト名は小文字化し、末尾のドットを除去する。例えば `https://sub.testtest.net/board/` は `sub.testtest.net` を `server-key` とする。`not5ch.net` のようなホスト名も、入力された文字列のとおり別のサーバーキーとして扱う。
 
 ### 5.4 `scope`
 
 `scope` はフィルターが属する範囲を表す。v2 では板単位とし、対応する `threadId` からスレッド部分を除いた次の形式を使用する。
 
 ```text
-<site-key>/<board-key>
+<server-key>/<board-key>
 ```
 
-例: `@5ch/software`
+例: `egg.5ch.net/software`
 
 `scope`、`targetType`、`target` の組が1つのフィルター項目のキーになる。すべて空文字列は禁止する。
 
@@ -177,7 +165,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 アダプターは少なくとも、利用者がスレッドを明示的に開いたとき、および最終既読位置が進んだときにイベントを記録すべきである。同じ閲覧セッション中のスクロール通知は間引いてよいが、セッション終了時または短いデバウンス後に最新位置を記録する。
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440001","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"5ch/software/1750000000","type":"thread.viewed","position":125}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440001","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.viewed","position":125}
 ```
 
 ### 7.1.1 `thread.history.cleared`
@@ -193,7 +181,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 お気に入りと書き込み位置は閲覧履歴とは独立しており、このイベントでは削除しない。履歴だけが残っていたスレッドは通常の状態一覧から除外する。お気に入りまたは書き込み位置が残る場合は、それらの状態を保持する。
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440009","deviceId":"desktop-main","occurredAt":"2026-09-20T01:30:00.000Z","threadId":"5ch/software/1750000000","type":"thread.history.cleared"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440009","deviceId":"desktop-main","occurredAt":"2026-09-20T01:30:00.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.history.cleared"}
 ```
 
 ### 7.2 `thread.response-count.observed`
@@ -208,7 +196,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 `responseCount` はフィルター適用後の表示件数ではなく、サイト上の番号体系で観測できたレス数とする。同期状態は最大値を保持するため、サイト側の削除などによる件数減少は v2 では伝播しない。
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440002","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","threadId":"5ch/software/1750000000","type":"thread.response-count.observed","responseCount":130}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440002","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.response-count.observed","responseCount":130}
 ```
 
 ### 7.3 `thread.favorite.set`
@@ -225,7 +213,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 入力 API で `level` を省略した場合は `1` になるが、永続化イベントでは必須である。
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440003","deviceId":"desktop-main","occurredAt":"2026-09-20T01:25:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.set","level":3}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440003","deviceId":"desktop-main","occurredAt":"2026-09-20T01:25:00.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.favorite.set","level":3}
 ```
 
 ### 7.4 `thread.favorite.cleared`
@@ -237,7 +225,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `threadId` | string | 5.3節の共通キー |
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440004","deviceId":"desktop-main","occurredAt":"2026-09-20T01:26:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.cleared"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440004","deviceId":"desktop-main","occurredAt":"2026-09-20T01:26:00.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.favorite.cleared"}
 ```
 
 ### 7.5 `thread.post.recorded`
@@ -252,7 +240,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 投稿要求時の予測番号ではなく、サーバー応答または再取得によって確定したレス番号を記録すべきである。v2 に書き込み位置を取り消すイベントはない。
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440005","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:00.000Z","threadId":"5ch/software/1750000000","type":"thread.post.recorded","position":126}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440005","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:00.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.post.recorded","position":126}
 ```
 
 ### 7.6 `thread.metadata.updated`
@@ -266,10 +254,10 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `url` | string | 空でない絶対URL |
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440008","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:30.000Z","threadId":"@5ch/software/1750000000","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1750000000/"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440008","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:30.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1750000000/"}
 ```
 
-アダプターはスレッドを開いたとき、またはタイトルもしくは遷移先URLの変化を検出したときにイベントを記録する。同じ値の高頻度通知は抑止してよい。URLがホスト移転などで変わっても、同じスレッドであれば`threadId`を変更してはならない。
+アダプターはスレッドを開いたとき、またはタイトルもしくは遷移先URLの変化を検出したときにイベントを記録する。同じ値の高頻度通知は抑止してよい。ホスト名が変わった場合は `server-key` が変わるため、移転前後は別の `threadId` として扱う。
 
 ### 7.7 `filter.set`
 
@@ -287,7 +275,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 同じ `(scope, targetType, target)` に新しい `effect` を設定した場合は、同じフィルターの表示効果を更新する。`updatedAt` は競合解決に使われ、通常は `occurredAt` と同じ値にする。
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440006","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","type":"filter.set","scope":"5ch/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","updatedAt":"2026-09-20T01:28:00.000Z","hitAt":"2026-09-20T01:27:59.000Z"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440006","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","type":"filter.set","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","updatedAt":"2026-09-20T01:28:00.000Z","hitAt":"2026-09-20T01:27:59.000Z"}
 ```
 
 ### 7.8 `filter.cleared`
@@ -302,7 +290,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `updatedAt` | string | 意味上の更新日時 |
 
 ```json
-{"v":2,"id":"550e8400-e29b-41d4-a716-446655440007","deviceId":"desktop-main","occurredAt":"2026-09-20T01:29:00.000Z","type":"filter.cleared","scope":"5ch/software","targetType":"ID","target":"ABCDEFG","updatedAt":"2026-09-20T01:29:00.000Z"}
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440007","deviceId":"desktop-main","occurredAt":"2026-09-20T01:29:00.000Z","type":"filter.cleared","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","updatedAt":"2026-09-20T01:29:00.000Z"}
 ```
 
 ### 7.9 フィルター対象と表示効果
@@ -479,14 +467,14 @@ await adapter.applyProjectedState({ threads, filters }, {
 - v2 のイベントは `v: 2` を必須とする。
 - 受信側は未対応のバージョンまたはイベント種別を黙って解釈してはならない。
 - 既存フィールドの意味、型、統合規則を変える変更は新しい `v` を必要とする。
-- サイトプロファイルまたはフィルター対象の追加は、既存の意味を変えず識別子衝突がなければ仕様文書の後方互換な追加としてよい。
+- フィルター対象の追加は、既存の意味を変えず識別子衝突がなければ仕様文書の後方互換な追加としてよい。
 
 ## 14. 適合チェックリスト
 
 アダプターを相互運用対応とする前に、少なくとも次を確認する。
 
 - [ ] `deviceId` を永続化し、プロファイル複製時に再生成する。
-- [ ] 同じ 5ch URLから `@5ch/<board>/<thread>` の同じキーを生成する。
+- [ ] 同じ URLから `<server>/<board>/<thread>` の同じキーを生成し、サーバー名を保持する。
 - [ ] レス番号はフィルター後の表示位置ではなく元の番号を使う。
 - [ ] 全9イベントを正しい制約で発火する。
 - [ ] 同期反映からイベントを再発火しない。
@@ -507,7 +495,7 @@ await adapter.applyProjectedState({ threads, filters }, {
 
 ```json
 {
-  "threadId": "@5ch/software/1750000000",
+  "threadId": "egg.5ch.net/software/1750000000",
   "lastReadPosition": 125,
   "favoriteLevel": 3,
   "postPositions": [126]
@@ -521,8 +509,8 @@ await adapter.applyProjectedState({ threads, filters }, {
 次のお気に入りイベントがある場合、時刻が新しい解除が勝つ。
 
 ```jsonl
-{"v":2,"id":"a-set","deviceId":"desktop","occurredAt":"2026-09-20T01:00:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.set","level":5}
-{"v":2,"id":"b-clear","deviceId":"mobile","occurredAt":"2026-09-20T01:01:00.000Z","threadId":"5ch/software/1750000000","type":"thread.favorite.cleared"}
+{"v":2,"id":"a-set","deviceId":"desktop","occurredAt":"2026-09-20T01:00:00.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.favorite.set","level":5}
+{"v":2,"id":"b-clear","deviceId":"mobile","occurredAt":"2026-09-20T01:01:00.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.favorite.cleared"}
 ```
 
 結果には `favoriteLevel` が存在しない。イベントを逆順に受信しても結果は同じである。

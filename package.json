@@ -25,7 +25,7 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/bbsync.test.js dist/local-event-store.contract.test.js dist/site.test.js",
+    "test": "npm run build && node --test dist/bbsync.test.js dist/local-event-store.contract.test.js dist/server.test.js",
     "prepack": "npm test"
   },
   "repository": {

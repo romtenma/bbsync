@@ -15,12 +15,7 @@ export {
 } from "./project.js";
 export { segmentKey, type EventStore } from "./store.js";
 export { synchronizeStores } from "./synchronize.js";
-export {
-  KNOWN_SITE_PROFILES,
-  normalizeHostname,
-  normalizeSiteKey,
-  type SiteProfile,
-} from "./site.js";
+export { normalizeHostname } from "./server.js";
 export {
   DEFAULT_MAX_GLOBAL_POST_POSITIONS,
   DEFAULT_THREAD_RETENTION_PERIOD_MS,
