@@ -12,6 +12,7 @@ import {
   type SnapshotThreadState,
   type SnapshotViewed,
   type SnapshotHistoryCleared,
+  type SnapshotPostCleared,
   type SnapshotFilter,
   type StateSnapshot,
   type SyncEvent,
@@ -20,7 +21,7 @@ import {
   type FilterEntry,
 } from "./types.js";
 
-export interface ProjectedPostRecord {
+interface PostRecordBase {
   readonly threadId: string;
   readonly position: number;
   readonly occurredAt: string;
@@ -28,12 +29,15 @@ export interface ProjectedPostRecord {
   readonly eventId: string;
 }
 
+export interface ProjectedPostRecord extends PostRecordBase {}
+
 export interface ProjectedThreadState extends ThreadState {
   readonly metadata?: SnapshotThreadMetadata;
   readonly lastViewed?: SnapshotViewed;
   readonly historyCleared?: SnapshotHistoryCleared;
   readonly favoriteEvent?: SnapshotFavorite;
   readonly postRecords?: readonly ProjectedPostRecord[];
+  readonly postClearRecords?: readonly SnapshotPostCleared[];
 }
 
 export interface ProjectedFilterState extends FilterEntry {
@@ -52,7 +56,11 @@ interface MutableThreadState {
   favoriteLevel?: FavoriteLevel;
   favoriteEvent?: SnapshotFavorite;
   postPositions: Set<number>;
-  postRecords: Map<number, ProjectedPostRecord>;
+  postRecords: Map<number, MutablePostRecord>;
+}
+
+interface MutablePostRecord extends ProjectedPostRecord {
+  readonly cleared: boolean;
 }
 
 interface MutableFilterState extends ProjectedFilterState {}
@@ -151,11 +159,15 @@ export function snapshotFromStates(
     const postPositions = [
       ...(retainedPostsByThread.get(state.threadId) ?? []),
     ].sort((left, right) => left - right);
+    const postCleared = [...(state.postClearRecords ?? [])].sort(
+      (left, right) => left.position - right.position,
+    );
     const hasFavorite =
       state.favoriteEvent !== undefined &&
       !state.favoriteEvent.cleared &&
       state.favoriteLevel !== undefined;
     const hasPosts = postPositions.length > 0;
+    const hasPostClears = postCleared.length > 0;
     const activityTimestamps: number[] = [];
     if (state.lastViewed !== undefined) {
       const ts = Date.parse(state.lastViewed.occurredAt);
@@ -174,7 +186,7 @@ export function snapshotFromStates(
       createdAtMs - lastActivityAt < retentionPeriodMs;
     const hasHistoryClear = state.historyCleared !== undefined;
 
-    if (!hasFavorite && !hasPosts && !isRecent && !hasHistoryClear) {
+    if (!hasFavorite && !hasPosts && !hasPostClears && !isRecent && !hasHistoryClear) {
       continue;
     }
 
@@ -197,6 +209,7 @@ export function snapshotFromStates(
         ? {}
         : { favorite: state.favoriteEvent }),
       postPositions,
+      ...(postCleared.length === 0 ? {} : { postCleared }),
     });
   }
 
@@ -369,8 +382,19 @@ export function projectDetailedThreadStates(
           occurredAt: seed.lastViewed?.occurredAt ?? "1970-01-01T00:00:00.000Z",
           deviceId: "",
           eventId: "",
+          cleared: false,
         });
       }
+    }
+    for (const cleared of seed.postCleared ?? []) {
+      applyPostMarker(state, {
+        threadId: seed.threadId,
+        position: cleared.position,
+        occurredAt: cleared.occurredAt,
+        deviceId: cleared.deviceId,
+        eventId: cleared.eventId,
+        cleared: true,
+      });
     }
     if (
       seed.favorite !== undefined &&
@@ -475,21 +499,25 @@ export function projectDetailedThreadStates(
         }
         break;
       case "thread.post.recorded": {
-        state.postPositions.add(event.position);
-        const candidateRecord: ProjectedPostRecord = {
+        applyPostMarker(state, {
           threadId: event.threadId,
           position: event.position,
           occurredAt: event.occurredAt,
           deviceId: event.deviceId,
           eventId: event.id,
-        };
-        const existingRecord = state.postRecords.get(event.position);
-        if (
-          existingRecord === undefined ||
-          comparePostRecords(existingRecord, candidateRecord) < 0
-        ) {
-          state.postRecords.set(event.position, candidateRecord);
-        }
+          cleared: false,
+        });
+        break;
+      }
+      case "thread.post.cleared": {
+        applyPostMarker(state, {
+          threadId: event.threadId,
+          position: event.position,
+          occurredAt: event.occurredAt,
+          deviceId: event.deviceId,
+          eventId: event.id,
+          cleared: true,
+        });
         break;
       }
     }
@@ -498,39 +526,48 @@ export function projectDetailedThreadStates(
   return new Map<string, ProjectedThreadState>(
     [...mutableStates.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([threadId, state]) => [
-        threadId,
-        {
+      .map(([threadId, state]) => {
+        const postRecords = [...state.postRecords.values()]
+          .filter((record) => !record.cleared)
+          .map(({ cleared: _cleared, ...record }) => record);
+        const postClearRecords = [...state.postRecords.values()]
+          .filter((record) => record.cleared)
+          .map(({ cleared: _cleared, threadId: _threadId, ...record }) => record);
+        return [
           threadId,
-          ...(state.metadata === undefined
-            ? {}
-            : {
-                title: state.metadata.title,
-                url: state.metadata.url,
-                metadata: state.metadata,
-              }),
-          ...(state.lastReadPosition === undefined
-            ? {}
-            : { lastReadPosition: state.lastReadPosition }),
-          ...(state.responseCount === undefined
-            ? {}
-            : { responseCount: state.responseCount }),
-          ...(state.lastViewed === undefined
-            ? {}
-            : { lastViewed: state.lastViewed }),
-          ...(state.historyCleared === undefined
-            ? {}
-            : { historyCleared: state.historyCleared }),
-          ...(state.favoriteLevel === undefined
-            ? {}
-            : { favoriteLevel: state.favoriteLevel }),
-          ...(state.favoriteEvent === undefined
-            ? {}
-            : { favoriteEvent: state.favoriteEvent }),
-          postPositions: [...state.postPositions].sort((left, right) => left - right),
-          postRecords: [...state.postRecords.values()],
-        },
-      ]),
+          {
+            threadId,
+            ...(state.metadata === undefined
+              ? {}
+              : {
+                  title: state.metadata.title,
+                  url: state.metadata.url,
+                  metadata: state.metadata,
+                }),
+            ...(state.lastReadPosition === undefined
+              ? {}
+              : { lastReadPosition: state.lastReadPosition }),
+            ...(state.responseCount === undefined
+              ? {}
+              : { responseCount: state.responseCount }),
+            ...(state.lastViewed === undefined
+              ? {}
+              : { lastViewed: state.lastViewed }),
+            ...(state.historyCleared === undefined
+              ? {}
+              : { historyCleared: state.historyCleared }),
+            ...(state.favoriteLevel === undefined
+              ? {}
+              : { favoriteLevel: state.favoriteLevel }),
+            ...(state.favoriteEvent === undefined
+              ? {}
+              : { favoriteEvent: state.favoriteEvent }),
+            postPositions: [...state.postPositions].sort((left, right) => left - right),
+            postRecords,
+            ...(postClearRecords.length === 0 ? {} : { postClearRecords }),
+          },
+        ] as const;
+      }),
   );
 }
 
@@ -558,16 +595,33 @@ function getOrCreateState(
     state = {
       threadId,
       postPositions: new Set<number>(),
-      postRecords: new Map<number, ProjectedPostRecord>(),
+      postRecords: new Map<number, MutablePostRecord>(),
     };
     states.set(threadId, state);
   }
   return state;
 }
 
+function applyPostMarker(
+  state: MutableThreadState,
+  candidate: MutablePostRecord,
+): void {
+  const existing = state.postRecords.get(candidate.position);
+  if (existing !== undefined && comparePostRecords(existing, candidate) >= 0) {
+    return;
+  }
+
+  state.postRecords.set(candidate.position, candidate);
+  if (candidate.cleared) {
+    state.postPositions.delete(candidate.position);
+  } else {
+    state.postPositions.add(candidate.position);
+  }
+}
+
 function comparePostRecords(
-  left: ProjectedPostRecord,
-  right: ProjectedPostRecord,
+  left: PostRecordBase,
+  right: PostRecordBase,
 ): number {
   return (
     Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||

@@ -84,6 +84,9 @@ export function assertEvent(value: unknown): asserts value is SyncEvent {
     case "thread.post.recorded":
       assertPosition(event.position, false);
       break;
+    case "thread.post.cleared":
+      assertPosition(event.position, false);
+      break;
     case "filter.set":
     case "filter.cleared":
       break;
@@ -186,6 +189,14 @@ function assertSnapshotThread(value: unknown): void {
   )) {
     throw new TypeError("snapshot postPositions must contain positive safe integers");
   }
+  if (thread.postCleared !== undefined) {
+    if (!Array.isArray(thread.postCleared)) {
+      throw new TypeError("snapshot postCleared must be an array");
+    }
+    for (const marker of thread.postCleared) {
+      assertSnapshotPostCleared(marker);
+    }
+  }
   if (thread.favorite !== undefined) {
     if (typeof thread.favorite !== "object" || thread.favorite === null) {
       throw new TypeError("snapshot favorite must be an object");
@@ -211,6 +222,21 @@ function assertSnapshotThread(value: unknown): void {
     }
     assertSafeComponent(favorite.deviceId as string, "snapshot favorite.deviceId");
     assertSafeComponent(favorite.eventId as string, "snapshot favorite.eventId");
+  }
+}
+
+function assertSnapshotPostCleared(value: unknown): void {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("snapshot post-cleared marker must be an object");
+  }
+  const marker = value as Record<string, unknown>;
+  assertPosition(marker.position, false);
+  assertDateTime(marker.occurredAt, "snapshot postCleared.occurredAt");
+  for (const field of ["deviceId", "eventId"] as const) {
+    if (typeof marker[field] !== "string" || marker[field].length === 0) {
+      throw new TypeError(`snapshot postCleared.${field} must be a non-empty string`);
+    }
+    assertSafeComponent(marker[field] as string, `snapshot postCleared.${field}`);
   }
 }
 

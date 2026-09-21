@@ -30,6 +30,14 @@ export interface SnapshotHistoryCleared {
   readonly eventId: string;
 }
 
+/** A tombstone for a deleted own-post position. */
+export interface SnapshotPostCleared {
+  readonly position: number;
+  readonly occurredAt: string;
+  readonly deviceId: string;
+  readonly eventId: string;
+}
+
 export interface SnapshotThreadMetadata {
   readonly title: string;
   readonly url: string;
@@ -47,6 +55,8 @@ export interface SnapshotThreadState {
   readonly historyCleared?: SnapshotHistoryCleared;
   readonly favorite?: SnapshotFavorite;
   readonly postPositions: readonly number[];
+  /** Latest deletion marker for each deleted post position. */
+  readonly postCleared?: readonly SnapshotPostCleared[];
 }
 
 /** A browser-defined filter target type. */
@@ -128,6 +138,11 @@ export interface PostRecordedEvent extends BaseThreadEvent {
   readonly position: number;
 }
 
+export interface PostClearedEvent extends BaseThreadEvent {
+  readonly type: "thread.post.cleared";
+  readonly position: number;
+}
+
 export interface FilterSetEvent extends BaseEvent {
   readonly type: "filter.set";
   readonly scope: string;
@@ -154,6 +169,7 @@ export type SyncEvent =
   | FavoriteSetEvent
   | FavoriteClearedEvent
   | PostRecordedEvent
+  | PostClearedEvent
   | FilterSetEvent
   | FilterClearedEvent;
 
@@ -199,6 +215,11 @@ export interface PostRecordedInput extends BaseThreadEventInput {
   readonly position: number;
 }
 
+export interface PostClearedInput extends BaseThreadEventInput {
+  readonly type: "thread.post.cleared";
+  readonly position: number;
+}
+
 export interface FilterSetInput extends BaseEventInput {
   readonly type: "filter.set";
   readonly scope: string;
@@ -225,6 +246,7 @@ export type SyncEventInput =
   | FavoriteSetInput
   | FavoriteClearedInput
   | PostRecordedInput
+  | PostClearedInput
   | FilterSetInput
   | FilterClearedInput;
 

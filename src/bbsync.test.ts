@@ -47,6 +47,55 @@ test("projects bulletin-board state from JSONL events", async () => {
   }
 });
 
+test("clears a post position and keeps the deletion marker through sync and compaction", async () => {
+  const fixture = await createFixture(1, 0);
+  try {
+    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
+
+    await desktop.recordPost("thread-1", 11);
+    const cleared = await desktop.clearPost("thread-1", 11);
+    assert.equal(cleared.type, "thread.post.cleared");
+    assert.deepEqual(await desktop.getThreadState("thread-1"), {
+      threadId: "thread-1",
+      postPositions: [],
+    });
+
+    const snapshot = await desktop.compact();
+    assert.deepEqual(snapshot.threads[0]?.postCleared, [{
+      position: 11,
+      occurredAt: "2026-09-20T00:00:00.000Z",
+      deviceId: "desktop",
+      eventId: "id-desktop-2",
+    }]);
+
+    await mobile.append([{
+      type: "thread.post.recorded",
+      threadId: "thread-1",
+      position: 11,
+      occurredAt: "2026-09-19T23:59:00.000Z",
+    }]);
+    await desktop.synchronizeWith(mobile.storage);
+    assert.deepEqual(await desktop.getThreadState("thread-1"), {
+      threadId: "thread-1",
+      postPositions: [],
+    });
+
+    await desktop.append([{
+      type: "thread.post.recorded",
+      threadId: "thread-1",
+      position: 11,
+      occurredAt: "2026-09-20T00:01:00.000Z",
+    }]);
+    assert.deepEqual(await desktop.getThreadState("thread-1"), {
+      threadId: "thread-1",
+      postPositions: [11],
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("clears synchronized thread history without removing favorites or posts", async () => {
   const fixture = await createFixture();
   try {

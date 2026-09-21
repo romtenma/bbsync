@@ -36,6 +36,7 @@ await sync.recordResponseCount("egg.5ch.net/software/1234567890", 130);
 await sync.setFavorite("egg.5ch.net/software/1234567890", 3);
 await sync.clearFavorite("egg.5ch.net/software/1234567890");
 await sync.recordPost("egg.5ch.net/software/1234567890", 126);
+await sync.clearPost("egg.5ch.net/software/1234567890", 126);
 // 閲覧履歴から削除する（削除操作も全端末へ同期される）
 await sync.clearThreadHistory("egg.5ch.net/software/1234567890");
 
@@ -113,7 +114,7 @@ bbsync-data/
 - 閲覧履歴削除: `thread.history.cleared`より前の閲覧位置・閲覧日時を無効化。削除後に再閲覧すると新しい履歴として復活
 - レス数: 端末間で観測した最大値を採用
 - お気に入り: 1〜5のレベルで管理。省略時はレベル1。`occurredAt`が新しい操作を採用し、同時刻の場合は端末IDとイベントIDで決定
-- 書き込み位置: 全端末の位置を重複なしで統合。スナップショット作成時（`compact()`）に全スレッドをまたいで最新1,000件（既定）を保持
+- 書き込み位置: 位置ごとに `thread.post.recorded` と `thread.post.cleared` の新しい方を採用。削除マーカーはスナップショットにも保持し、古いオフライン端末の位置が復活しないようにする。スナップショット作成時（`compact()`）に有効な位置を全スレッドをまたいで最新1,000件（既定）まで保持
 - イベント: イベントIDで重複排除。同じIDで内容が異なる場合はエラー
 - セグメント: `maxEventsPerSegment`件で次のファイルへローテーション
 - フィルター: `scope`、`targetType`、`target`の組をキーに、`updatedAt`が新しい状態を採用。`effect`は対象の表示効果
@@ -122,6 +123,7 @@ bbsync-data/
 `clearThreadHistory()`は閲覧履歴の削除を記録します。削除イベントは対象が現在存在しなくても保存し、古いオフライン端末の閲覧履歴が同期後に復活しないようにします。お気に入りと書き込み位置は履歴削除の対象外です。
 
 `clearFavorite()`はお気に入り解除を記録します。解除後に古い端末のレベル設定が復活しないよう、解除も最終更新情報としてスナップショットへ保存されます。
+`clearPost()`は指定した自分の書き込み位置を削除します。削除対象が現在存在しなくても削除マーカーを保存し、同じ位置の古いオフラインイベントが同期後に復活しないようにします。削除後に同じ位置を`recordPost()`すると、新しい記録として再び保持されます。
 `clearFilter()`も同様に解除情報を保存します。
 
 セグメントは追記方向にだけ更新できます。同じセグメントの両側が異なる内容へ分岐した場合は、データを暗黙に選ばず同期エラーにします。1つの`deviceId`に対する書き込み元は常に1端末に限定してください。

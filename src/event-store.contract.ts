@@ -158,6 +158,15 @@ function sampleEvents(deviceId: string): readonly SyncEvent[] {
     },
     {
       v: 2,
+      id: `${deviceId}-post-cleared`,
+      deviceId,
+      occurredAt: "2026-09-20T00:00:03.500Z",
+      threadId: "thread-1",
+      type: "thread.post.cleared",
+      position: 11,
+    },
+    {
+      v: 2,
       id: `${deviceId}-filter-set`,
       deviceId,
       occurredAt: "2026-09-20T00:00:04.000Z",
@@ -203,6 +212,12 @@ function sampleSnapshot(revision: number): StateSnapshot {
           eventId: "desktop-favorite",
         },
         postPositions: [11],
+        postCleared: [{
+          position: 12,
+          occurredAt: "2026-09-20T00:00:03.500Z",
+          deviceId: "desktop",
+          eventId: "desktop-post-cleared",
+        }],
       },
     ],
     filters: [],

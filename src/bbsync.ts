@@ -114,6 +114,13 @@ export class BbsSync {
     return event!;
   }
 
+  async clearPost(threadId: string, position: number): Promise<SyncEvent> {
+    const [event] = await this.append([
+      { type: "thread.post.cleared", threadId, position },
+    ]);
+    return event!;
+  }
+
   async recordResponseCount(threadId: string, responseCount: number): Promise<SyncEvent> {
     const [event] = await this.append([
       { type: "thread.response-count.observed", threadId, responseCount },
@@ -342,6 +349,9 @@ export class BbsSync {
       case "thread.favorite.cleared":
         return { ...threadBase, type: input.type };
       case "thread.post.recorded":
+        assertPosition(input.position, false);
+        return { ...threadBase, type: input.type, position: input.position };
+      case "thread.post.cleared":
         assertPosition(input.position, false);
         return { ...threadBase, type: input.type, position: input.position };
     }

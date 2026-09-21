@@ -29,7 +29,7 @@ v2 が同期する状態は次のとおりである。
 | 閲覧履歴の削除マーカー | `thread.history.cleared` | `(occurredAt, deviceId, id)`の最新。これより前の閲覧状態を無効化 |
 | 観測済みレス数 | `thread.response-count.observed` | 最大値 |
 | お気に入りとレベル | `thread.favorite.set` / `thread.favorite.cleared` | 最終更新優先 |
-| 自分の書き込み位置 | `thread.post.recorded` | 集合の和 |
+| 自分の書き込み位置 | `thread.post.recorded` / `thread.post.cleared` | 位置ごとの最終更新優先。削除はトゥームストーンとして保持 |
 | フィルター | `filter.set` / `filter.cleared` | 最終更新優先 |
 
 スレッド本文、画像、Cookie、認証情報、板一覧、UI 設定は v2 の対象外である。
@@ -237,13 +237,23 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `threadId` | string | 5.3節の共通キー |
 | `position` | integer | `1` 以上 |
 
-投稿要求時の予測番号ではなく、サーバー応答または再取得によって確定したレス番号を記録すべきである。v2 に書き込み位置を取り消すイベントはない。
+投稿要求時の予測番号ではなく、サーバー応答または再取得によって確定したレス番号を記録すべきである。
 
 ```json
 {"v":2,"id":"550e8400-e29b-41d4-a716-446655440005","deviceId":"desktop-main","occurredAt":"2026-09-20T01:27:00.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.post.recorded","position":126}
 ```
 
-### 7.6 `thread.metadata.updated`
+### 7.6 `thread.post.cleared`
+
+利用者が自分の書き込み位置を削除したことを表す。`position` は削除対象のレス番号であり、`1` 以上とする。対象位置が現在の射影に存在しなくてもイベントを保存しなければならない（MUST）。
+
+削除は位置ごとのトゥームストーンである。`thread.post.recorded` と `thread.post.cleared` を `(occurredAt, deviceId, id)` で比較し、より新しいイベントが `cleared` なら位置を非表示にする。削除後に同じ位置を新しい `thread.post.recorded` で記録した場合は、位置を再表示する。
+
+```json
+{"v":2,"id":"550e8400-e29b-41d4-a716-446655440010","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","threadId":"egg.5ch.net/software/1750000000","type":"thread.post.cleared","position":126}
+```
+
+### 7.7 `thread.metadata.updated`
 
 スレッドの表示用タイトルと遷移先URLを一組として記録する。タイトルやURLは`threadId`の主キーには使わない。
 
@@ -259,7 +269,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 アダプターはスレッドを開いたとき、またはタイトルもしくは遷移先URLの変化を検出したときにイベントを記録する。同じ値の高頻度通知は抑止してよい。ホスト名が変わった場合は `server-key` が変わるため、移転前後は別の `threadId` として扱う。
 
-### 7.7 `filter.set`
+### 7.8 `filter.set`
 
 フィルターを設定する。フィルターは `scope`、`targetType`、`target` の組で識別し、`effect` で一致時の表示効果を指定する。
 
@@ -278,7 +288,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 {"v":2,"id":"550e8400-e29b-41d4-a716-446655440006","deviceId":"desktop-main","occurredAt":"2026-09-20T01:28:00.000Z","type":"filter.set","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","updatedAt":"2026-09-20T01:28:00.000Z","hitAt":"2026-09-20T01:27:59.000Z"}
 ```
 
-### 7.8 `filter.cleared`
+### 7.9 `filter.cleared`
 
 `scope`、`targetType`、`target` が一致するフィルターを解除する。解除も保持し、古いオフライン端末の設定を復活させない。
 
@@ -293,7 +303,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 {"v":2,"id":"550e8400-e29b-41d4-a716-446655440007","deviceId":"desktop-main","occurredAt":"2026-09-20T01:29:00.000Z","type":"filter.cleared","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","updatedAt":"2026-09-20T01:29:00.000Z"}
 ```
 
-### 7.9 フィルター対象と表示効果
+### 7.10 フィルター対象と表示効果
 
 `targetType` と `target` の組で、条件とする対象を表す。`targetType`の値は専用ブラウザが定義する。以下は推奨値の例であり、これらに限定されない。
 
@@ -318,7 +328,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | `NOP` | 完全に非表示 |
 | `HIGHLIGHT` | 強調表示 |
 
-### 7.10 `effect` の解釈
+### 7.11 `effect` の解釈
 
 `effect` の具体的な色、透明度、アニメーションなどはクライアントが決定する。未対応の `targetType` または `effect` を受信したアダプターは、そのフィルターをローカルで適用しなくてもよい。
 
@@ -336,11 +346,13 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | 閲覧履歴削除 | `(occurredAt, deviceId, id)` が最大の `thread.history.cleared` より前の閲覧状態を無効化 |
 | `responseCount` | 最新の `thread.history.cleared` より後に発生した `responseCount` の最大値 |
 | `favoriteLevel` | 8.2節で勝ったイベントが `set` ならその `level`、`cleared` なら未設定 |
-| `postPositions` | 全 `thread.post.recorded.position` の重複なし昇順集合 |
+| `postPositions` | 位置ごとに最終更新が `thread.post.recorded` となった位置の重複なし昇順集合 |
 
 最終閲覧日時と最終既読位置は独立して統合する。たとえば、位置100を読んだ古いイベントと、その後に位置80を再閲覧したイベントがある場合、`lastReadPosition` は100、`lastViewedAt` は後者の日時になる。
 
 タイトルとURLは常に同じイベントから取得する。スナップショットには値に加えて、そのイベントの`occurredAt`、`deviceId`、`eventId`を保存し、コンパクション後も古いオフライン端末の更新で上書きされないようにする。メタデータ未取得のスレッドでは`title`と`url`を省略する。
+
+スナップショットは、有効な`postPositions`に加えて、削除済み位置の最新マーカーを`postCleared`へ保存する。これにより、コンパクション後に古いオフライン端末の`thread.post.recorded`が届いても削除状態を維持する。
 
 ### 8.2 お気に入り
 
@@ -382,6 +394,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 | お気に入りを追加、またはレベルを変更 | `thread.favorite.set` |
 | お気に入りを解除 | `thread.favorite.cleared` |
 | 投稿したレス番号が確定 | `thread.post.recorded` |
+| 自分の書き込み位置を削除 | `thread.post.cleared` |
 | フィルターを追加、または同じキーを更新 | `filter.set` |
 | フィルターを解除 | `filter.cleared` |
 
@@ -392,6 +405,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 アダプターは同期後、`getStates()` と `getFilters()` に相当する射影結果を取得してブラウザへ反映する。
 
 - 既読位置、レス数、書き込み位置はブラウザ固有の表示番号ではなくサイト上のレス番号へ変換する。
+- `thread.post.cleared`を受信した位置は、ブラウザ側の自分の書き込み位置から削除する。
 - お気に入りは解除状態も含め、最後に適用した射影との差分を反映する。
 - フィルターはアダプターが対応する対象種別と表示効果だけを動作へ反映してよい。
 - 対応できないレベルやフィルターがあっても、同期データ自体を削除または上書きしない。
@@ -405,7 +419,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 ## 10. 時計と順序
 
-閲覧位置、レス数、書き込み位置は単調な統合のため時計ずれの影響を受けない。お気に入り、フィルター、最終閲覧日時は端末時計に依存する。
+閲覧位置とレス数は単調な統合のため時計ずれの影響を受けない。書き込み位置は記録と削除を位置ごとのイベント時刻で比較するため、削除の競合解決は端末時計に依存する。お気に入り、フィルター、最終閲覧日時も端末時計に依存する。
 
 アダプターは次を満たすべきである。
 
@@ -427,6 +441,7 @@ v2 はベクトル時計やサーバー時刻による補正を定義しない�
 | `thread.favorite.set` | `setFavorite(threadId, level)` |
 | `thread.favorite.cleared` | `clearFavorite(threadId)` |
 | `thread.post.recorded` | `recordPost(threadId, position)` |
+| `thread.post.cleared` | `clearPost(threadId, position)` |
 | `filter.set` | `setFilter(scope, targetType, target, effect, options)` |
 | `filter.cleared` | `clearFilter(scope, targetType, target, options)` |
 
@@ -476,7 +491,7 @@ await adapter.applyProjectedState({ threads, filters }, {
 - [ ] `deviceId` を永続化し、プロファイル複製時に再生成する。
 - [ ] 同じ URLから `<server>/<board>/<thread>` の同じキーを生成し、サーバー名を保持する。
 - [ ] レス番号はフィルター後の表示位置ではなく元の番号を使う。
-- [ ] 全9イベントを正しい制約で発火する。
+- [ ] 全10イベントを正しい制約で発火する。
 - [ ] 同期反映からイベントを再発火しない。
 - [ ] 同じ射影を複数回適用しても結果が変わらない。
 - [ ] お気に入り解除とフィルター解除を状態として保持する。
