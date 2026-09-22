@@ -1,4 +1,4 @@
-import type { EventStore } from "./store.js";
+import { segmentKey, type EventStore } from "./store.js";
 import {
   DEFAULT_MAX_GLOBAL_POST_POSITIONS,
   DEFAULT_THREAD_RETENTION_PERIOD_MS,
@@ -96,10 +96,39 @@ export async function readProjectionSource(
     snapshot === undefined ? [] : [snapshot],
   );
   const segments: readonly StoredSegment[] = segmentValues;
+  void deduplicateEvents(segments.flatMap((segment) => segment.events));
+  const coveredCounts = new Map<string, number>();
+  for (const snapshot of snapshots) {
+    for (const coverage of snapshot.coveredSegments) {
+      coveredCounts.set(
+        segmentKey({
+          deviceId: snapshot.deviceId,
+          segmentId: coverage.segmentId,
+        }),
+        coverage.eventCount,
+      );
+    }
+  }
+  const coveredEventIds = new Set<string>();
+  const uncoveredEvents: SyncEvent[] = [];
+  for (const segment of segments) {
+    const coveredCount = coveredCounts.get(segmentKey(segment.ref)) ?? 0;
+    if (coveredCount > segment.events.length) {
+      throw new Error(
+        `snapshot coverage exceeds segment length: ${segment.ref.deviceId}/${segment.ref.segmentId}`,
+      );
+    }
+    for (const event of segment.events.slice(0, coveredCount)) {
+      coveredEventIds.add(event.id);
+    }
+    uncoveredEvents.push(...segment.events.slice(coveredCount));
+  }
   return {
     snapshots,
     segments,
-    events: deduplicateEvents(segments.flatMap((segment) => segment.events)),
+    events: deduplicateEvents(
+      uncoveredEvents.filter((event) => !coveredEventIds.has(event.id)),
+    ),
   };
 }
 
@@ -116,25 +145,21 @@ export async function readAllEvents(
 export async function readProjectedStates(
   store: EventStore,
 ): Promise<ReadonlyMap<string, ProjectedThreadState>> {
-  const snapshots = await Promise.all(
-    (await store.listSnapshots()).map((deviceId) => store.readSnapshot(deviceId)),
+  const source = await readProjectionSource(store);
+  return projectDetailedThreadStates(
+    source.events,
+    source.snapshots.flatMap((snapshot) => snapshot.threads),
   );
-  const seeds = snapshots.flatMap((snapshot) =>
-    snapshot === undefined ? [] : snapshot.threads,
-  );
-  return projectDetailedThreadStates(await readAllEvents(store), seeds);
 }
 
 export async function readProjectedFilters(
   store: EventStore,
 ): Promise<ReadonlyMap<string, ProjectedFilterState>> {
-  const snapshots = await Promise.all(
-    (await store.listSnapshots()).map((deviceId) => store.readSnapshot(deviceId)),
+  const source = await readProjectionSource(store);
+  return projectFilterStates(
+    source.events,
+    source.snapshots.flatMap((snapshot) => snapshot.filters),
   );
-  const seeds = snapshots.flatMap((snapshot) =>
-    snapshot === undefined ? [] : snapshot.filters,
-  );
-  return projectFilterStates(await readAllEvents(store), seeds);
 }
 
 export function snapshotFromStates(
@@ -205,10 +230,7 @@ export function snapshotFromStates(
     const postCleared = [...(state.postClearRecords ?? [])].sort(
       (left, right) => left.position - right.position,
     );
-    const hasFavorite =
-      state.favoriteEvent !== undefined &&
-      !state.favoriteEvent.cleared &&
-      state.favoriteLevel !== undefined;
+    const hasFavoriteState = state.favoriteEvent !== undefined;
     const hasPosts = postPositions.length > 0;
     const hasPostClears = postCleared.length > 0;
     const activityTimestamps: number[] = [];
@@ -229,7 +251,13 @@ export function snapshotFromStates(
       createdAtMs - lastActivityAt < retentionPeriodMs;
     const hasHistoryClear = state.historyCleared !== undefined;
 
-    if (!hasFavorite && !hasPosts && !hasPostClears && !isRecent && !hasHistoryClear) {
+    if (
+      !hasFavoriteState &&
+      !hasPosts &&
+      !hasPostClears &&
+      !isRecent &&
+      !hasHistoryClear
+    ) {
       continue;
     }
 
@@ -380,6 +408,8 @@ export function projectDetailedThreadStates(
 ): ReadonlyMap<string, ProjectedThreadState> {
   const mutableStates = new Map<string, MutableThreadState>();
 
+  // Establish the latest deletion boundary before merging aggregate snapshot
+  // values so the outcome does not depend on snapshot enumeration order.
   for (const seed of seeds) {
     const state = getOrCreateState(mutableStates, seed.threadId);
     if (
@@ -393,12 +423,22 @@ export function projectDetailedThreadStates(
       state.responseCount = undefined;
       state.lastViewed = undefined;
     }
+  }
+
+  for (const seed of seeds) {
+    const state = getOrCreateState(mutableStates, seed.threadId);
 
     const seedIsCurrentHistoryEpoch =
       seed.historyCleared === undefined
         ? state.historyCleared === undefined
         : state.historyCleared !== undefined &&
           compareHistoryMarkers(state.historyCleared, seed.historyCleared) === 0;
+    const seedHasViewAfterHistoryClear =
+      state.historyCleared !== undefined &&
+      seed.lastViewed !== undefined &&
+      compareHistoryMarkers(state.historyCleared, seed.lastViewed) < 0;
+    const seedCanContributeHistory =
+      seedIsCurrentHistoryEpoch || seedHasViewAfterHistoryClear;
 
     if (
       seed.metadata !== undefined &&
@@ -407,7 +447,7 @@ export function projectDetailedThreadStates(
     ) {
       state.metadata = seed.metadata;
     }
-    if (seedIsCurrentHistoryEpoch && seed.lastReadPosition !== undefined) {
+    if (seedCanContributeHistory && seed.lastReadPosition !== undefined) {
       state.lastReadPosition = Math.max(
         state.lastReadPosition ?? 0,
         seed.lastReadPosition,
@@ -421,14 +461,14 @@ export function projectDetailedThreadStates(
     ) {
       state.firstReadPosition = seed.firstReadPosition;
     }
-    if (seedIsCurrentHistoryEpoch && seed.responseCount !== undefined) {
+    if (seedCanContributeHistory && seed.responseCount !== undefined) {
       state.responseCount = Math.max(
         state.responseCount ?? 0,
         seed.responseCount,
       );
     }
     if (
-      seedIsCurrentHistoryEpoch &&
+      seedCanContributeHistory &&
       seed.lastViewed !== undefined &&
       (state.lastViewed === undefined ||
         compareViewedEvents(state.lastViewed, seed.lastViewed) < 0)
@@ -493,7 +533,6 @@ export function projectDetailedThreadStates(
 
     switch (event.type) {
       case "thread.metadata.updated":
-        if (!isAfterHistoryClear(event, state.historyCleared)) break;
         if (
           state.metadata === undefined ||
           compareMetadataEvents(state.metadata, event) < 0
@@ -533,15 +572,21 @@ export function projectDetailedThreadStates(
           state.historyCleared === undefined ||
           compareHistoryMarkers(state.historyCleared, event) < 0
         ) {
-          state.historyCleared = {
+          const marker: SnapshotHistoryCleared = {
             occurredAt: event.occurredAt,
             deviceId: event.deviceId,
             eventId: event.id,
           };
-          state.lastReadPosition = undefined;
-          state.firstReadPosition = undefined;
-          state.responseCount = undefined;
-          state.lastViewed = undefined;
+          state.historyCleared = marker;
+          if (
+            state.lastViewed === undefined ||
+            compareViewedEvents(state.lastViewed, event) <= 0
+          ) {
+            state.lastReadPosition = undefined;
+            state.firstReadPosition = undefined;
+            state.responseCount = undefined;
+            state.lastViewed = undefined;
+          }
         }
         break;
       case "thread.response-count.observed":

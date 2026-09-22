@@ -328,6 +328,41 @@ test("clears synchronized thread history without removing favorites or posts", a
   }
 });
 
+test("keeps an offline view that occurred after another device cleared history", async () => {
+  const fixture = await createFixture(1, 0);
+  try {
+    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
+    await desktop.append([{
+      type: "thread.history.cleared",
+      threadId: "thread-1",
+      occurredAt: "2026-09-20T00:01:00.000Z",
+    }]);
+    await mobile.append([{
+      type: "thread.viewed",
+      threadId: "thread-1",
+      position: 8,
+      firstPosition: 6,
+      occurredAt: "2026-09-20T00:02:00.000Z",
+    }]);
+    await desktop.compact();
+    await mobile.compact();
+
+    await desktop.synchronizeWith(mobile.storage);
+    const expected = {
+      threadId: "thread-1",
+      lastReadPosition: 8,
+      firstReadPosition: 6,
+      lastViewedAt: "2026-09-20T00:02:00.000Z",
+      postPositions: [],
+    };
+    assert.deepEqual(await desktop.getThreadState("thread-1"), expected);
+    assert.deepEqual(await mobile.getThreadState("thread-1"), expected);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("keeps a history deletion marker through compaction", async () => {
   const fixture = await createFixture(1, 0);
   try {
@@ -438,6 +473,43 @@ test("preserves thread metadata conflict information through compaction", async 
       threadId: "thread-1",
       title: "新しいタイトル",
       url: "https://example.com/thread/1",
+      postPositions: [],
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("merges thread metadata independently of a history deletion snapshot", async () => {
+  const fixture = await createFixture(1, 0);
+  try {
+    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    const offline = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
+    await desktop.append([{
+      type: "thread.history.cleared",
+      threadId: "thread-1",
+      occurredAt: "2026-09-20T00:01:00.000Z",
+    }, {
+      type: "thread.favorite.set",
+      threadId: "thread-1",
+      level: 1,
+      occurredAt: "2026-09-20T00:01:00.000Z",
+    }]);
+    await desktop.compact();
+    await offline.append([{
+      type: "thread.metadata.updated",
+      threadId: "thread-1",
+      title: "オフラインで取得したタイトル",
+      url: "https://example.com/thread/1",
+      occurredAt: "2026-09-20T00:00:00.000Z",
+    }]);
+
+    await desktop.synchronizeWith(offline.storage);
+    assert.deepEqual(await desktop.getThreadState("thread-1"), {
+      threadId: "thread-1",
+      title: "オフラインで取得したタイトル",
+      url: "https://example.com/thread/1",
+      favoriteLevel: 1,
       postPositions: [],
     });
   } finally {
@@ -647,13 +719,15 @@ test("keeps events added after the snapshot coverage", async () => {
 });
 
 test("keeps a cleared favorite over an older offline level", async () => {
-  const fixture = await createFixture(2, 1);
+  const fixture = await createFixture(2, 0);
   try {
     const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
     const offline = createSync(fixture.right, "mobile", "2026-09-19T00:00:00Z");
     await desktop.setFavorite("thread-1", 4);
     await desktop.clearFavorite("thread-1");
-    await desktop.compact();
+    const snapshot = await desktop.compact();
+    assert.equal(snapshot.threads[0]?.favorite?.cleared, true);
+    assert.deepEqual(await fixture.left.listSegments(), []);
     await offline.setFavorite("thread-1", 5);
 
     await desktop.synchronizeWith(offline.storage);
@@ -823,12 +897,15 @@ test("retains only the newest global post positions across threads during compac
     assert.deepEqual(thread1?.postPositions, [11]);
     assert.deepEqual(thread2?.postPositions, [21]);
     assert.deepEqual(thread3?.postPositions, [30]);
+    assert.deepEqual((await sync.getThreadState("thread-1"))?.postPositions, [11]);
+    assert.deepEqual((await sync.getThreadState("thread-2"))?.postPositions, [21]);
+    assert.deepEqual((await sync.getThreadState("thread-3"))?.postPositions, [30]);
   } finally {
     await fixture.cleanup();
   }
 });
 
-test("prunes inactive threads (older than 30 days, no favorite, no posts) from snapshot", async () => {
+test("retains conflict markers while pruning inactive threads from snapshot", async () => {
   const fixture = await createFixture(10, 0);
   try {
     // Current sync time is 2026-09-30
@@ -844,7 +921,7 @@ test("prunes inactive threads (older than 30 days, no favorite, no posts) from s
       { type: "thread.post.recorded", threadId: "thread-c", position: 12, occurredAt: "2026-08-21T00:00:00Z" },
       // Thread D: Viewed 10 days ago (2026-09-20), within 30 days -> must be kept
       { type: "thread.viewed", threadId: "thread-d", position: 20, occurredAt: "2026-09-20T00:00:00Z" },
-      // Thread E: Viewed 40 days ago, favorite set and cleared -> should be pruned
+      // Thread E: Viewed 40 days ago, favorite set and cleared -> tombstone must be kept
       { type: "thread.viewed", threadId: "thread-e", position: 25, occurredAt: "2026-08-21T00:00:00Z" },
       { type: "thread.favorite.set", threadId: "thread-e", level: 2, occurredAt: "2026-08-21T00:00:00Z" },
       { type: "thread.favorite.cleared", threadId: "thread-e", occurredAt: "2026-08-21T01:00:00Z" },
@@ -852,7 +929,7 @@ test("prunes inactive threads (older than 30 days, no favorite, no posts) from s
 
     const snapshot = await sync.compact();
     const threadIds = snapshot.threads.map((t) => t.threadId);
-    assert.deepEqual(threadIds, ["thread-b", "thread-c", "thread-d"]);
+    assert.deepEqual(threadIds, ["thread-b", "thread-c", "thread-d", "thread-e"]);
   } finally {
     await fixture.cleanup();
   }

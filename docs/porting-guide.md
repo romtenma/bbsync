@@ -125,7 +125,7 @@
 
 ### 5.1 入力の集め方
 
-状態を読むときは、ストレージ内の全端末のスナップショットをseedとして読み、全セグメントのイベントを重ねます。
+状態を読むときは、ストレージ内の全端末のスナップショットをseedとして読み、各スナップショットがまだ被覆していないセグメントイベントを重ねます。スナップショットの `deviceId` と各 `coveredSegments.segmentId` から対象セグメントを特定し、先頭 `eventCount` 件はすでにseedへ反映済みとして再適用しません。セグメントが伸びている場合は、それより後ろのイベントだけを適用します。被覆件数が現在のセグメント件数を超えていたら、セグメントの短縮または破損としてエラーにします。
 
 セグメントイベントは全端末・全セグメントを通じて `id` で重複排除します。同じ `id` のイベントが複数あり、キー順を含む正規化後JSONが一致しなければ衝突エラーです。
 
@@ -141,7 +141,7 @@
 
 スレッドごとに次の規則を適用します。
 
-- **metadata**: `(occurredAt, deviceId, eventId)` が最大の候補を採用する。`title` と `url` は分割しない
+- **metadata**: 履歴削除とは独立に、`(occurredAt, deviceId, eventId)` が最大の候補を採用する。`title` と `url` は分割しない
 - **lastReadPosition**: 現在の閲覧履歴epoch内の `thread.viewed.position` の最大値
 - **firstReadPosition**: 最新の `thread.viewed` の `firstPosition`。最新イベントで省略されていれば未設定に戻す
 - **lastViewed**: `(occurredAt, deviceId, eventId)` が最大の `thread.viewed`
@@ -151,7 +151,9 @@
 
 metadata、viewed、history cleared、favoriteの「最新」はすべて同じ3要素の比較です。書き込み位置は最後に `threadId`, `position` も比較しますが、通常は先のイベントIDまでで決まります。
 
-`thread.history.cleared` は `(occurredAt, deviceId, eventId)` が最大のものを現在の履歴epoch境界にします。境界以前または境界と同順序の metadata/viewed/response-count イベントはseedへ重ねる際に無視します。境界が更新された時点で `lastReadPosition`、`firstReadPosition`、`responseCount`、`lastViewed` を消します。お気に入りと書き込み位置は消しません。すでにseedに保持されているmetadataも消しません。
+`thread.history.cleared` は `(occurredAt, deviceId, eventId)` が最大のものを現在の履歴epoch境界にします。境界以前または境界と同順序のviewed/response-countイベントを無視し、境界より新しいイベントを新しい履歴として扱います。metadata、お気に入り、書き込み位置は履歴削除の対象外です。
+
+複数端末が独立してcompactしたスナップショットを統合するときは、最初に最新のhistory clear境界を決めます。スナップショットの `historyCleared` がその境界と一致する場合に加え、`lastViewed` が境界より新しい場合も、そのスナップショットの閲覧位置・閲覧日時・レス数を新しいepochの候補にします。これにより、別端末で履歴を削除した後、まだ同期していない端末で行われた新しい閲覧を保持します。history clearイベントを後から適用する場合も、すでに保持している `lastViewed` がその境界より新しければ閲覧状態を消しません。
 
 履歴削除後に閲覧されておらず、お気に入りも書き込み位置もないスレッドは公開状態一覧から隠します。削除後に再閲覧すれば再び表示します。履歴削除マーカーを一度も持たない状態は、従来互換のため他の値が空でも残る場合があります。
 
@@ -302,12 +304,13 @@ retainSegmentsPerDevice = 1
 スレッドは次のいずれかを満たす場合にsnapshotへ残します。
 
 - 有効なお気に入りがある
+- お気に入りの解除tombstoneがある
 - 保持対象の有効な書き込み位置がある
 - 書き込み位置の削除tombstoneがある
 - `lastViewed` またはmetadataの最終活動が保持期間内。ただしhistory clearがある場合、metadata日時は活動判定に使わない
 - history clear tombstoneがある
 
-解除済みfavoriteだけでは保持理由になりませんが、他の理由でthreadが残る場合はfavorite tombstoneも一緒に保存します。フィルターは解除済みを含めてすべてsnapshotへ保存します。
+favorite tombstoneは、古いオフライン端末のお気に入り設定が復活しないよう、それ自体を保持理由として保存します。フィルターも解除済みを含めてすべてsnapshotへ保存します。
 
 `threads` は `threadId` 順、各threadの `postPositions`、`postRecords`、`postCleared` は位置の昇順に出力します。現行TypeScript版の `threadId` 順は実行環境の `localeCompare` に依存するため、非ASCIIの並び順をプロトコル上の意味として利用しないでください。filtersは競合比較順の昇順です。
 
@@ -415,6 +418,7 @@ TypeScript版のストレージ実装を同じランタイム内で追加する�
 - [ ] セグメントを短縮・上書き・暗黙マージしない
 - [ ] snapshot revisionを単調増加させる
 - [ ] coverageの件数が一致するセグメントだけをpruneする
+- [ ] snapshotでcoverage済みのイベント接頭辞を状態へ再適用しない
 - [ ] 同一 `deviceId` を複数writerで使用しない
 - [ ] 同期の冪等性、オフライン端末との再同期、同時刻競合をテストする
 
