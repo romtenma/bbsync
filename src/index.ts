@@ -43,6 +43,7 @@ export {
   type SnapshotFavorite,
   type SnapshotHistoryCleared,
   type SnapshotPostCleared,
+  type SnapshotPostRecorded,
   type SnapshotThreadState,
   type SnapshotThreadMetadata,
   type SnapshotViewed,

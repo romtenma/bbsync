@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import {
   readProjectedStates,
   readProjectedFilters,
+  readProjectionSource,
+  projectDetailedThreadStates,
+  projectFilterStates,
   snapshotFromStates,
   isProjectedThreadStateVisible,
 } from "./project.js";
@@ -257,17 +260,22 @@ export class BbsSync {
   }
 
   async compact(options?: CompactOptions): Promise<StateSnapshot> {
-    const states = await readProjectedStates(this.storage);
-    const filters = await readProjectedFilters(this.storage);
+    const source = await readProjectionSource(this.storage);
+    const states = projectDetailedThreadStates(
+      source.events,
+      source.snapshots.flatMap((snapshot) => snapshot.threads),
+    );
+    const filters = projectFilterStates(
+      source.events,
+      source.snapshots.flatMap((snapshot) => snapshot.filters),
+    );
     const previous = await this.storage.readSnapshot(this.deviceId);
-    const coveredSegments: SegmentCoverage[] = [];
-    for (const ref of await this.storage.listSegments()) {
-      if (ref.deviceId !== this.deviceId) continue;
-      coveredSegments.push({
+    const coveredSegments: SegmentCoverage[] = source.segments
+      .filter(({ ref }) => ref.deviceId === this.deviceId)
+      .map(({ ref, events }) => ({
         segmentId: ref.segmentId,
-        eventCount: (await this.storage.readSegment(ref)).length,
-      });
-    }
+        eventCount: events.length,
+      }));
     const snapshot = snapshotFromStates(
       this.deviceId,
       (previous?.revision ?? 0) + 1,

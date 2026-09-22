@@ -40,6 +40,14 @@ export interface SnapshotPostCleared {
   readonly eventId: string;
 }
 
+/** Conflict-resolution metadata for an active own-post position. */
+export interface SnapshotPostRecorded {
+  readonly position: number;
+  readonly occurredAt: string;
+  readonly deviceId: string;
+  readonly eventId: string;
+}
+
 export interface SnapshotThreadMetadata {
   readonly title: string;
   readonly url: string;
@@ -59,6 +67,8 @@ export interface SnapshotThreadState {
   readonly historyCleared?: SnapshotHistoryCleared;
   readonly favorite?: SnapshotFavorite;
   readonly postPositions: readonly number[];
+  /** Latest recording marker for active post positions. Added compatibly in v2. */
+  readonly postRecords?: readonly SnapshotPostRecorded[];
   /** Latest deletion marker for each deleted post position. */
   readonly postCleared?: readonly SnapshotPostCleared[];
 }

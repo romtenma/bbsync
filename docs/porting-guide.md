@@ -245,7 +245,7 @@ SegmentCoverage:
 
 SnapshotThreadState:
   threadId, metadata, lastReadPosition, firstReadPosition, responseCount,
-  lastViewed, historyCleared, favorite, postPositions, postCleared
+  lastViewed, historyCleared, favorite, postPositions, postRecords, postCleared
 
 metadata:
   title, url, occurredAt, deviceId, eventId
@@ -262,25 +262,28 @@ favorite:
 postCleared item:
   position, occurredAt, deviceId, eventId
 
+postRecords item:
+  position, occurredAt, deviceId, eventId
+
 filter:
   scope, targetType, target, effect, isRegex, updatedAt, hitAt,
   cleared, deviceId, eventId
 ```
 
-省略可能な値がない場合はキーごと省略します。`postPositions` と `filters` は空でも必須です。各threadの `postPositions` も必須です。`favorite.cleared` がtrueなら `level` は出力しません。
+省略可能な値がない場合はキーごと省略します。`postPositions` と `filters` は空でも必須です。各threadの `postPositions` も必須です。有効な書き込み位置のうち競合順序が分かるものは、同じ位置を `postRecords` にも記録します。`favorite.cleared` がtrueなら `level` は出力しません。
 
 ### 8.2 作成手順
 
 compactは次の手順で実行します。
 
-1. 全端末のsnapshotと全segmentから現在状態を射影する
+1. 全端末のsnapshotと全segmentを一度ずつ読み取り、現在状態を射影する
 2. 自端末の既存snapshot revisionに1を加える。未存在なら1
-3. `createdAt` を現在時刻として、自端末に属する全segmentの `segmentId` と現在のイベント件数を `coveredSegments` に記録する
+3. `createdAt` を現在時刻として、手順1で読み取った自端末segmentの `segmentId` とイベント件数を `coveredSegments` に記録する
 4. 保持ポリシーを適用してsnapshotを構築する
 5. snapshotを保存する
 6. 完全にcover済みの自端末segmentを整理する
 
-`coveredSegments.eventCount` が現在のセグメント行数と完全一致するときだけ、そのセグメントを削除候補にできます。snapshot作成後に同じセグメントへイベントが追記されて件数が増えた場合は削除してはいけません。
+状態射影後にsegmentを読み直してcoverageを作ると、その間に追記された未射影イベントまでcoverしたことになり得ます。状態とcoverageは必ず同じ読み取り結果から作ります。`coveredSegments.eventCount` が整理時点のセグメント行数と完全一致するときだけ、そのセグメントを削除候補にできます。読み取り後に同じセグメントへイベントが追記されて件数が増えた場合は削除してはいけません。
 
 ### 8.3 保持ポリシー
 
@@ -292,7 +295,9 @@ retentionPeriod = 30 days
 retainSegmentsPerDevice = 1
 ```
 
-有効な書き込み位置を全スレッド横断で、書き込み位置の比較順が新しいものから最大 `maxGlobalPostPositions` 件残します。同じスレッド内だけの上限ではありません。削除tombstoneはこの件数に含めず、別に保持します。snapshot由来で元イベントの時刻が不明な書き込み位置は、`lastViewed.occurredAt`、それもなければUnix epochを代用します。
+有効な書き込み位置を全スレッド横断で、書き込み位置の比較順が新しいものから最大 `maxGlobalPostPositions` 件残します。同じスレッド内だけの上限ではありません。削除tombstoneはこの件数に含めず、別に保持します。新しく作るsnapshotでは、有効な位置の `occurredAt`、`deviceId`、`eventId` を `postRecords` に保存します。
+
+初期のv2実装が作ったsnapshotには `postRecords` がありません。この旧形式を読む場合、`postPositions` は順序不明の記録として扱います。同じ位置について順序情報を持つrecordedまたはclearedマーカーが別に存在する場合は、順序不明の記録よりもそのマーカーを優先します。これによりsnapshotの列挙順で削除状態が変わることを防ぎます。
 
 スレッドは次のいずれかを満たす場合にsnapshotへ残します。
 
@@ -304,7 +309,7 @@ retainSegmentsPerDevice = 1
 
 解除済みfavoriteだけでは保持理由になりませんが、他の理由でthreadが残る場合はfavorite tombstoneも一緒に保存します。フィルターは解除済みを含めてすべてsnapshotへ保存します。
 
-`threads` は `threadId` 順、各threadの `postPositions` と `postCleared` は位置の昇順に出力します。現行TypeScript版の `threadId` 順は実行環境の `localeCompare` に依存するため、非ASCIIの並び順をプロトコル上の意味として利用しないでください。filtersは競合比較順の昇順です。
+`threads` は `threadId` 順、各threadの `postPositions`、`postRecords`、`postCleared` は位置の昇順に出力します。現行TypeScript版の `threadId` 順は実行環境の `localeCompare` に依存するため、非ASCIIの並び順をプロトコル上の意味として利用しないでください。filtersは競合比較順の昇順です。
 
 ## 9. ローカルファイル形式
 

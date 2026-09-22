@@ -10,7 +10,7 @@ import {
   projectDetailedThreadStates,
   projectFilterStates,
 } from "./project.js";
-import type { SyncEvent } from "./types.js";
+import type { SnapshotThreadState, SyncEvent } from "./types.js";
 
 test("projects bulletin-board state from JSONL events", async () => {
   const fixture = await createFixture();
@@ -161,6 +161,103 @@ test("clears a post position and keeps the deletion marker through sync and comp
     });
   } finally {
     await fixture.cleanup();
+  }
+});
+
+test("does not cover an event appended after compact captured its state", async () => {
+  const fixture = await createFixture(10, 0);
+  try {
+    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    await desktop.recordThreadView("thread-1", 1);
+
+    // Keep snapshot discovery side-effect free so readSnapshot marks the exact
+    // point between projection capture and snapshot creation.
+    fixture.left.listSnapshots = async () => [];
+    const readSnapshot = fixture.left.readSnapshot.bind(fixture.left);
+    let appended = false;
+    fixture.left.readSnapshot = async (deviceId) => {
+      if (!appended) {
+        appended = true;
+        await desktop.append([{
+          type: "thread.post.recorded",
+          threadId: "thread-2",
+          position: 7,
+          occurredAt: "2026-09-20T00:01:00.000Z",
+        }]);
+      }
+      return readSnapshot(deviceId);
+    };
+
+    const snapshot = await desktop.compact();
+    assert.equal(snapshot.coveredSegments[0]?.eventCount, 1);
+    assert.equal((await fixture.left.listSegments()).length, 1);
+    assert.deepEqual(await desktop.getThreadState("thread-2"), {
+      threadId: "thread-2",
+      postPositions: [7],
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("preserves active post ordering metadata through compaction", async () => {
+  const fixture = await createFixture(1, 0);
+  try {
+    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
+    await desktop.append([{
+      type: "thread.post.recorded",
+      threadId: "thread-1",
+      position: 7,
+      occurredAt: "2026-09-20T00:02:00.000Z",
+    }]);
+
+    const snapshot = await desktop.compact();
+    assert.deepEqual(snapshot.threads[0]?.postRecords, [{
+      position: 7,
+      occurredAt: "2026-09-20T00:02:00.000Z",
+      deviceId: "desktop",
+      eventId: "id-desktop-1",
+    }]);
+    assert.deepEqual(await fixture.left.listSegments(), []);
+
+    await mobile.append([{
+      type: "thread.post.cleared",
+      threadId: "thread-1",
+      position: 7,
+      occurredAt: "2026-09-20T00:01:00.000Z",
+    }]);
+    await desktop.synchronizeWith(fixture.right);
+    assert.deepEqual(await desktop.getThreadState("thread-1"), {
+      threadId: "thread-1",
+      postPositions: [7],
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("merges legacy post positions and deletion markers independently of snapshot order", () => {
+  const active: SnapshotThreadState = {
+    threadId: "thread-1",
+    postPositions: [7],
+  };
+  const deleted: SnapshotThreadState = {
+    threadId: "thread-1",
+    postPositions: [],
+    postCleared: [{
+      position: 7,
+      occurredAt: "2026-09-20T00:01:00.000Z",
+      deviceId: "desktop",
+      eventId: "delete-1",
+    }],
+  };
+
+  for (const seeds of [[active, deleted], [deleted, active]]) {
+    assert.deepEqual(
+      projectDetailedThreadStates([], seeds).get("thread-1")?.postPositions,
+      [],
+    );
   }
 });
 

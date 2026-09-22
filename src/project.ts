@@ -13,9 +13,11 @@ import {
   type SnapshotViewed,
   type SnapshotHistoryCleared,
   type SnapshotPostCleared,
+  type SnapshotPostRecorded,
   type SnapshotFilter,
   type StateSnapshot,
   type SyncEvent,
+  type SegmentRef,
   type ThreadState,
   type FavoriteLevel,
   type FilterEntry,
@@ -66,21 +68,49 @@ interface MutablePostRecord extends ProjectedPostRecord {
 
 interface MutableFilterState extends ProjectedFilterState {}
 
+interface StoredSegment {
+  readonly ref: SegmentRef;
+  readonly events: readonly SyncEvent[];
+}
+
+export interface ProjectionSource {
+  readonly snapshots: readonly StateSnapshot[];
+  readonly segments: readonly StoredSegment[];
+  readonly events: readonly SyncEvent[];
+}
+
+/** Reads every projection input once so snapshot contents and coverage agree. */
+export async function readProjectionSource(
+  store: EventStore,
+): Promise<ProjectionSource> {
+  const snapshotIds = await store.listSnapshots();
+  const segmentRefs = await store.listSegments();
+  const [snapshotValues, segmentValues] = await Promise.all([
+    Promise.all(snapshotIds.map((deviceId) => store.readSnapshot(deviceId))),
+    Promise.all(segmentRefs.map(async (ref) => ({
+      ref,
+      events: await store.readSegment(ref),
+    }))),
+  ]);
+  const snapshots = snapshotValues.flatMap((snapshot) =>
+    snapshot === undefined ? [] : [snapshot],
+  );
+  const segments: readonly StoredSegment[] = segmentValues;
+  return {
+    snapshots,
+    segments,
+    events: deduplicateEvents(segments.flatMap((segment) => segment.events)),
+  };
+}
+
 export async function readAllEvents(
   store: EventStore,
 ): Promise<readonly SyncEvent[]> {
-  const eventsById = new Map<string, SyncEvent>();
+  const events: SyncEvent[] = [];
   for (const ref of await store.listSegments()) {
-    for (const event of await store.readSegment(ref)) {
-      const existing = eventsById.get(event.id);
-      if (existing === undefined) {
-        eventsById.set(event.id, event);
-      } else if (JSON.stringify(existing) !== JSON.stringify(event)) {
-        throw new Error(`event id collision with different contents: ${event.id}`);
-      }
-    }
+    events.push(...await store.readSegment(ref));
   }
-  return [...eventsById.values()];
+  return deduplicateEvents(events);
 }
 
 export async function readProjectedStates(
@@ -145,21 +175,33 @@ export function snapshotFromStates(
       ? allPostRecords.slice(-maxGlobalPostPositions)
       : allPostRecords;
 
-  const retainedPostsByThread = new Map<string, Set<number>>();
+  const retainedPostsByThread = new Map<string, Map<number, ProjectedPostRecord>>();
   for (const record of retainedPostRecords) {
-    let set = retainedPostsByThread.get(record.threadId);
-    if (set === undefined) {
-      set = new Set<number>();
-      retainedPostsByThread.set(record.threadId, set);
+    let records = retainedPostsByThread.get(record.threadId);
+    if (records === undefined) {
+      records = new Map<number, ProjectedPostRecord>();
+      retainedPostsByThread.set(record.threadId, records);
     }
-    set.add(record.position);
+    records.set(record.position, record);
   }
 
   const threads: SnapshotThreadState[] = [];
   for (const state of states.values()) {
-    const postPositions = [
-      ...(retainedPostsByThread.get(state.threadId) ?? []),
-    ].sort((left, right) => left - right);
+    const retainedRecords = retainedPostsByThread.get(state.threadId) ?? new Map();
+    const postPositions = [...retainedRecords.keys()].sort((left, right) => left - right);
+    const postRecords: SnapshotPostRecorded[] = postPositions.flatMap((position) => {
+      const record = retainedRecords.get(position)!;
+      // Old v2 snapshots did not retain this metadata. Keep their position for
+      // compatibility, but do not serialize an invalid synthetic marker.
+      return record.deviceId.length === 0 || record.eventId.length === 0
+        ? []
+        : [{
+            position: record.position,
+            occurredAt: record.occurredAt,
+            deviceId: record.deviceId,
+            eventId: record.eventId,
+          }];
+    });
     const postCleared = [...(state.postClearRecords ?? [])].sort(
       (left, right) => left.position - right.position,
     );
@@ -213,6 +255,7 @@ export function snapshotFromStates(
         ? {}
         : { favorite: state.favoriteEvent }),
       postPositions,
+      ...(postRecords.length === 0 ? {} : { postRecords }),
       ...(postCleared.length === 0 ? {} : { postCleared }),
     });
   }
@@ -394,18 +437,15 @@ export function projectDetailedThreadStates(
       state.firstReadPosition =
         seed.firstReadPosition ?? seed.lastViewed.firstPosition;
     }
-    for (const position of seed.postPositions) {
-      state.postPositions.add(position);
-      if (!state.postRecords.has(position)) {
-        state.postRecords.set(position, {
-          threadId: seed.threadId,
-          position,
-          occurredAt: seed.lastViewed?.occurredAt ?? "1970-01-01T00:00:00.000Z",
-          deviceId: "",
-          eventId: "",
-          cleared: false,
-        });
-      }
+    for (const recorded of seed.postRecords ?? []) {
+      applyPostMarker(state, {
+        threadId: seed.threadId,
+        position: recorded.position,
+        occurredAt: recorded.occurredAt,
+        deviceId: recorded.deviceId,
+        eventId: recorded.eventId,
+        cleared: false,
+      });
     }
     for (const cleared of seed.postCleared ?? []) {
       applyPostMarker(state, {
@@ -416,6 +456,22 @@ export function projectDetailedThreadStates(
         eventId: cleared.eventId,
         cleared: true,
       });
+    }
+    for (const position of seed.postPositions) {
+      // Legacy v2 snapshots have no ordering metadata for active positions.
+      // Only seed an unknown marker when no explicit recorded/cleared marker
+      // exists, making deletion win independently of snapshot enumeration.
+      if (!state.postRecords.has(position)) {
+        state.postPositions.add(position);
+        state.postRecords.set(position, {
+          threadId: seed.threadId,
+          position,
+          occurredAt: "1970-01-01T00:00:00.000Z",
+          deviceId: "",
+          eventId: "",
+          cleared: false,
+        });
+      }
     }
     if (
       seed.favorite !== undefined &&
@@ -640,8 +696,14 @@ function applyPostMarker(
   candidate: MutablePostRecord,
 ): void {
   const existing = state.postRecords.get(candidate.position);
-  if (existing !== undefined && comparePostRecords(existing, candidate) >= 0) {
-    return;
+  if (existing !== undefined) {
+    const existingHasOrder = hasPostOrder(existing);
+    const candidateHasOrder = hasPostOrder(candidate);
+    if (!candidateHasOrder || (
+      existingHasOrder && comparePostRecords(existing, candidate) >= 0
+    )) {
+      return;
+    }
   }
 
   state.postRecords.set(candidate.position, candidate);
@@ -650,6 +712,10 @@ function applyPostMarker(
   } else {
     state.postPositions.add(candidate.position);
   }
+}
+
+function hasPostOrder(record: PostRecordBase): boolean {
+  return record.deviceId.length > 0 && record.eventId.length > 0;
 }
 
 function comparePostRecords(
@@ -756,4 +822,17 @@ function compareOrdinal(left: string, right: string): number {
 
 function filterKey(scope: string, targetType: string, target: string): string {
   return JSON.stringify([scope, targetType, target]);
+}
+
+function deduplicateEvents(events: readonly SyncEvent[]): readonly SyncEvent[] {
+  const eventsById = new Map<string, SyncEvent>();
+  for (const event of events) {
+    const existing = eventsById.get(event.id);
+    if (existing === undefined) {
+      eventsById.set(event.id, event);
+    } else if (JSON.stringify(existing) !== JSON.stringify(event)) {
+      throw new Error(`event id collision with different contents: ${event.id}`);
+    }
+  }
+  return [...eventsById.values()];
 }
