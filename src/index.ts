@@ -1,4 +1,12 @@
 export { BbsSync, type BbsSyncOptions } from "./bbsync.js";
+export {
+  BbsyncError,
+  CoverageMismatchError,
+  EventCollisionError,
+  SegmentDivergenceError,
+  SnapshotCollisionError,
+  type SegmentIdentifier,
+} from "./errors.js";
 export { LocalEventStore } from "./local-event-store.js";
 export {
   projectDetailedThreadStates,

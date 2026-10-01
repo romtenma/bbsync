@@ -5,10 +5,18 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { BbsSync } from "./bbsync.js";
+import {
+  BbsyncError,
+  CoverageMismatchError,
+  EventCollisionError,
+  SegmentDivergenceError,
+  SnapshotCollisionError,
+} from "./errors.js";
 import { LocalEventStore } from "./local-event-store.js";
 import {
   projectDetailedThreadStates,
   projectFilterStates,
+  readAllEvents,
 } from "./project.js";
 import type { SnapshotThreadState, SyncEvent } from "./types.js";
 
@@ -930,6 +938,176 @@ test("retains conflict markers while pruning inactive threads from snapshot", as
     const snapshot = await sync.compact();
     const threadIds = snapshot.threads.map((t) => t.threadId);
     assert.deepEqual(threadIds, ["thread-b", "thread-c", "thread-d", "thread-e"]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("throws SegmentDivergenceError when segments diverge during synchronization", async () => {
+  const fixture = await createFixture();
+  try {
+    const leftSync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    const ref = { deviceId: "desktop", segmentId: "manual-1" };
+    const event1: SyncEvent = {
+      v: 2,
+      id: "event-1",
+      deviceId: "desktop",
+      occurredAt: "2026-09-20T00:00:00.000Z",
+      threadId: "thread-1",
+      type: "thread.viewed",
+      position: 10,
+    };
+    const event2: SyncEvent = {
+      v: 2,
+      id: "event-2",
+      deviceId: "desktop",
+      occurredAt: "2026-09-20T00:00:00.000Z",
+      threadId: "thread-1",
+      type: "thread.viewed",
+      position: 20,
+    };
+
+    await fixture.left.writeSegment(ref, [event1]);
+    await fixture.right.writeSegment(ref, [event2]);
+
+    await assert.rejects(
+      () => leftSync.synchronizeWith(fixture.right),
+      (error: unknown) => {
+        assert(error instanceof BbsyncError);
+        assert(error instanceof SegmentDivergenceError);
+        assert.equal(error.deviceId, "desktop");
+        assert.equal(error.segmentId, "manual-1");
+        assert(/diverged/.test(error.message));
+        return true;
+      },
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("throws SnapshotCollisionError when same revision snapshots differ during synchronization", async () => {
+  const fixture = await createFixture();
+  try {
+    const leftSync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+
+    await fixture.left.writeSnapshot({
+      v: 2,
+      deviceId: "desktop",
+      revision: 1,
+      createdAt: "2026-09-20T00:00:00.000Z",
+      coveredSegments: [],
+      threads: [{ threadId: "thread-1", postPositions: [] }],
+      filters: [],
+    });
+
+    await fixture.right.writeSnapshot({
+      v: 2,
+      deviceId: "desktop",
+      revision: 1,
+      createdAt: "2026-09-20T00:00:00.000Z",
+      coveredSegments: [],
+      threads: [{ threadId: "thread-2", postPositions: [] }],
+      filters: [],
+    });
+
+    await assert.rejects(
+      () => leftSync.synchronizeWith(fixture.right),
+      (error: unknown) => {
+        assert(error instanceof BbsyncError);
+        assert(error instanceof SnapshotCollisionError);
+        assert.equal(error.deviceId, "desktop");
+        assert.equal(error.revision, 1);
+        assert(/collision/.test(error.message));
+        return true;
+      },
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("throws EventCollisionError when same event id has different contents", async () => {
+  const fixture = await createFixture();
+  try {
+    const ref1 = { deviceId: "desktop-1", segmentId: "seg-1" };
+    const ref2 = { deviceId: "desktop-2", segmentId: "seg-2" };
+    const event1: SyncEvent = {
+      v: 2,
+      id: "collision-event-1",
+      deviceId: "desktop-1",
+      occurredAt: "2026-09-20T00:00:00.000Z",
+      threadId: "thread-1",
+      type: "thread.viewed",
+      position: 10,
+    };
+    const event2: SyncEvent = {
+      v: 2,
+      id: "collision-event-1",
+      deviceId: "desktop-2",
+      occurredAt: "2026-09-20T00:00:00.000Z",
+      threadId: "thread-1",
+      type: "thread.viewed",
+      position: 20,
+    };
+
+    await fixture.left.writeSegment(ref1, [event1]);
+    await fixture.left.writeSegment(ref2, [event2]);
+
+    await assert.rejects(
+      () => readAllEvents(fixture.left),
+      (error: unknown) => {
+        assert(error instanceof BbsyncError);
+        assert(error instanceof EventCollisionError);
+        assert.equal(error.eventId, "collision-event-1");
+        assert(/collision/.test(error.message));
+        return true;
+      },
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("throws CoverageMismatchError when snapshot coverage exceeds segment length", async () => {
+  const fixture = await createFixture();
+  try {
+    const ref = { deviceId: "desktop", segmentId: "seg-1" };
+    await fixture.left.writeSegment(ref, [
+      {
+        v: 2,
+        id: "event-1",
+        deviceId: "desktop",
+        occurredAt: "2026-09-20T00:00:00.000Z",
+        threadId: "thread-1",
+        type: "thread.viewed",
+        position: 10,
+      },
+    ]);
+    await fixture.left.writeSnapshot({
+      v: 2,
+      deviceId: "desktop",
+      revision: 1,
+      createdAt: "2026-09-20T00:00:00.000Z",
+      coveredSegments: [{ segmentId: "seg-1", eventCount: 5 }],
+      threads: [],
+      filters: [],
+    });
+
+    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
+    await assert.rejects(
+      () => sync.getStates(),
+      (error: unknown) => {
+        assert(error instanceof BbsyncError);
+        assert(error instanceof CoverageMismatchError);
+        assert.equal(error.deviceId, "desktop");
+        assert.equal(error.segmentId, "seg-1");
+        assert.equal(error.coveredCount, 5);
+        assert.equal(error.actualCount, 1);
+        assert(/exceeds segment length/.test(error.message));
+        return true;
+      },
+    );
   } finally {
     await fixture.cleanup();
   }

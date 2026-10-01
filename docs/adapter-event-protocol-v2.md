@@ -27,7 +27,7 @@ v2 が同期する状態は次のとおりである。
 | スレッドタイトル・遷移先URL | `thread.metadata.updated` | `(occurredAt, deviceId, id)`の最新 |
 | 最終既読位置・表示範囲・最終閲覧日時 | `thread.viewed` | `position`（表示上の最後）は最大値、`firstPosition`（表示上の最初）は最新イベントの任意値、日時は最新イベント |
 | 閲覧履歴の削除マーカー | `thread.history.cleared` | `(occurredAt, deviceId, id)`の最新。これより前の閲覧状態を無効化 |
-| 観測済みレス数 | `thread.response-count.observed` | 最大値 |
+| 観測済みレス数 | `thread.response-count.observed` | 最新の閲覧履歴削除より後の最大値 |
 | お気に入りとレベル | `thread.favorite.set` / `thread.favorite.cleared` | 最終更新優先 |
 | 自分の書き込み位置 | `thread.post.recorded` / `thread.post.cleared` | 位置ごとの最終更新優先。削除はトゥームストーンとして保持 |
 | フィルター | `filter.set` / `filter.cleared` | 最終更新優先 |
@@ -340,7 +340,7 @@ URL 以外の内部データから生成する場合も同じ結果にならな�
 
 ## 8. 状態の統合規則
 
-イベントの到着順やセグメント列挙順は状態の結果に影響してはならない。比較で「辞書順」とある箇所は、Unicode コードポイントに基づく昇順で大きい側を新しいものとして選ぶ。
+イベントの到着順やセグメント列挙順は状態の結果に影響してはならない。比較で「辞書順」とある箇所は、ロケールに依存しない文字列比較を使う。競合解決に使う `deviceId` と `id` はASCII文字に制限されるため、ASCIIコード順で大きい側を新しいものとして選ぶ。
 
 ### 8.1 スレッド状態
 

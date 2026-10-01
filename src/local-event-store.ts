@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 
+import { SegmentDivergenceError, SnapshotCollisionError } from "./errors.js";
 import type { EventStore } from "./store.js";
 import type { SegmentRef, StateSnapshot, SyncEvent } from "./types.js";
 import {
@@ -141,7 +142,7 @@ export class LocalEventStore implements EventStore {
       if (eventsEqual(existingEvents, events)) return;
       if (isEventPrefix(events, existingEvents)) return;
       if (!isEventPrefix(existingEvents, events)) {
-        throw new Error(`append-only segment has diverged: ${path}`);
+        throw new SegmentDivergenceError(path);
       }
     } catch (error) {
       if (!isNotFound(error)) throw error;
@@ -201,9 +202,7 @@ export class LocalEventStore implements EventStore {
       if (existing.revision > snapshot.revision) return;
       if (existing.revision === snapshot.revision) {
         if (JSON.stringify(existing) === JSON.stringify(snapshot)) return;
-        throw new Error(
-          `snapshot revision collision: ${snapshot.deviceId}/${snapshot.revision}`,
-        );
+        throw new SnapshotCollisionError(snapshot.deviceId, snapshot.revision);
       }
     }
 

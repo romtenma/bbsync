@@ -1,3 +1,4 @@
+import { CoverageMismatchError, EventCollisionError } from "./errors.js";
 import { segmentKey, type EventStore } from "./store.js";
 import {
   DEFAULT_MAX_GLOBAL_POST_POSITIONS,
@@ -114,8 +115,10 @@ export async function readProjectionSource(
   for (const segment of segments) {
     const coveredCount = coveredCounts.get(segmentKey(segment.ref)) ?? 0;
     if (coveredCount > segment.events.length) {
-      throw new Error(
-        `snapshot coverage exceeds segment length: ${segment.ref.deviceId}/${segment.ref.segmentId}`,
+      throw new CoverageMismatchError(
+        segment.ref.deviceId,
+        segment.ref.segmentId,
+        { coveredCount, actualCount: segment.events.length },
       );
     }
     for (const event of segment.events.slice(0, coveredCount)) {
@@ -876,7 +879,7 @@ function deduplicateEvents(events: readonly SyncEvent[]): readonly SyncEvent[] {
     if (existing === undefined) {
       eventsById.set(event.id, event);
     } else if (JSON.stringify(existing) !== JSON.stringify(event)) {
-      throw new Error(`event id collision with different contents: ${event.id}`);
+      throw new EventCollisionError(event.id);
     }
   }
   return [...eventsById.values()];

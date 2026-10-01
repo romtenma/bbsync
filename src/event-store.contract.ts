@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { SegmentDivergenceError, SnapshotCollisionError } from "./errors.js";
 import type { EventStore } from "./store.js";
 import type { SegmentRef, StateSnapshot, SyncEvent } from "./types.js";
 
@@ -50,7 +51,9 @@ export function registerEventStoreContractTests(
       assert.deepEqual(await store.readSegment(ref), events.slice(0, 2));
       await assert.rejects(
         () => store.writeSegment(ref, [events[1]!]),
-        /diverged/,
+        (error: unknown) =>
+          error instanceof SegmentDivergenceError &&
+          /diverged/.test(error.message),
       );
     });
   });
@@ -65,7 +68,11 @@ export function registerEventStoreContractTests(
 
       await assert.rejects(
         () => store.writeSnapshot({ ...current, createdAt: "2026-09-21T00:00:00.000Z" }),
-        /collision/,
+        (error: unknown) =>
+          error instanceof SnapshotCollisionError &&
+          error.deviceId === "desktop" &&
+          error.revision === 2 &&
+          /collision/.test(error.message),
       );
     });
   });

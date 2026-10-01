@@ -1,3 +1,4 @@
+import { SegmentDivergenceError, SnapshotCollisionError } from "./errors.js";
 import { segmentKey, type EventStore } from "./store.js";
 import type {
   SegmentRef,
@@ -42,9 +43,7 @@ export async function synchronizeStores(
       await right.writeSegment(rightRef, leftEvents);
       updatedRight += 1;
     } else {
-      throw new Error(
-        `append-only segment has diverged: ${leftRef.deviceId}/${leftRef.segmentId}`,
-      );
+      throw new SegmentDivergenceError(leftRef);
     }
   }
 
@@ -97,7 +96,7 @@ async function synchronizeSnapshots(
         await left.writeSnapshot(rightSnapshot);
         copiedToLeft += 1;
       } else if (!snapshotsEqual(leftSnapshot, rightSnapshot)) {
-        throw new Error(`snapshot revision collision: ${deviceId}/${leftSnapshot.revision}`);
+        throw new SnapshotCollisionError(deviceId, leftSnapshot.revision);
       }
     }
   }
