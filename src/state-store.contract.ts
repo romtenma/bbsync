@@ -73,15 +73,18 @@ export function registerStateStoreContractTests(name: string, create: () => Prom
       value: { title: "Changed", url: "https://example.com/t" }, revision: 1 }] }), DocumentConflictError);
   });
 
-  scenario("retains old keys and rejects changes without a new item revision", async (store) => {
+  scenario("merges partial documents without removing omitted keys", async (store) => {
     await store.writeDocument(second);
-    await assert.rejects(() => store.writeDocument({
+    await store.writeDocument({
       ...second, revision: 3, entries: [{ key: ["favorite", "thread-1"], value: 5, revision: 3 }],
-    }), DocumentConflictError);
+    });
+    assert.deepEqual((await store.readDocument("desktop"))!.entries, [
+      { key: ["favorite", "thread-1"], value: 5, revision: 3 }, second.entries[1]!,
+    ]);
     await assert.rejects(() => store.writeDocument({
       ...second, revision: 3,
       entries: [
-        { key: ["favorite", "thread-1"], value: 5, revision: 1 },
+        { key: ["favorite", "thread-1"], value: 1, revision: 3 },
         { key: ["post", "thread-1", 10], value: true, revision: 3 },
       ],
     }), DocumentConflictError);
@@ -89,6 +92,19 @@ export function registerStateStoreContractTests(name: string, create: () => Prom
       ...second, revision: 3,
       entries: [second.entries[0]!, { key: ["post", "thread-1", 10], value: true, revision: 3 }],
     });
+  });
+
+  scenario("accepts previously unseen older items and same-revision disjoint subsets", async (store) => {
+    await store.writeDocument({ ...first, revision: 10,
+      entries: [{ key: ["favorite", "t"], value: 3, revision: 10 }] });
+    await store.writeDocument({ ...first, revision: 2,
+      entries: [{ key: ["post", "t", 1], value: null, revision: 2 }] });
+    await store.writeDocument({ ...first, revision: 10,
+      entries: [{ key: ["count", "t"], value: 12, revision: 10 }] });
+    const document = (await store.readDocument("desktop"))!;
+    assert.equal(document.revision, 10);
+    assert.equal(document.entries.length, 3);
+    assert.ok(document.entries.some((entry) => entry.key[0] === "post" && entry.value === null));
   });
 
   scenario("validates device IDs, schema, keys and values before writing", async (store) => {

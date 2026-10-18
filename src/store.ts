@@ -1,13 +1,13 @@
 import { canonicalJson, compareStrings } from "./encoding.js";
 import { DocumentConflictError } from "./errors.js";
-import type { StateDocument, StateKey } from "./types.js";
+import { SCHEMA_VERSION, type StateDocument, type StateEntry, type StateKey } from "./types.js";
 import { assertDeviceId, assertDocument } from "./validation.js";
 
 /** Writes are atomic and serialized. Documents and their keys are never removed. */
 export interface StateStore {
   listDocuments(): Promise<readonly string[]>;
   readDocument(deviceId: string): Promise<StateDocument | undefined>;
-  /** Ignore older revisions, accept equal contents, reject forks or lost entries. */
+  /** Merge partial documents per key; omitted keys retain their saved values. */
   writeDocument(document: StateDocument): Promise<void>;
 }
 
@@ -39,18 +39,23 @@ export function documentsEqual(left: StateDocument, right: StateDocument): boole
   return canonicalJson(ordered(left)) === canonicalJson(ordered(right));
 }
 
-/** A newer file must preserve old keys and advance every changed item. */
-export function assertDocumentSuccessor(existing: StateDocument, candidate: StateDocument): void {
-  const next = new Map(candidate.entries.map((entry) => [entryKey(entry.key), entry]));
-  for (const old of existing.entries) {
-    const entry = next.get(entryKey(old.key));
-    if (entry === undefined ||
-      (canonicalJson(entry) !== canonicalJson(old) && entry.revision <= existing.revision)) {
-      throw new DocumentConflictError(candidate.deviceId, candidate.revision);
+export function documentFromEntries(deviceId: string, entries: readonly StateEntry[]): StateDocument {
+  let revision = 0;
+  for (const entry of entries) revision = Math.max(revision, entry.revision);
+  return { v: SCHEMA_VERSION, deviceId, revision, entries: [...entries].sort((a, b) => compareStrings(entryKey(a.key), entryKey(b.key))) };
+}
+
+/** Partial transfers from the same writer can share a document revision. */
+export function mergeDeviceDocuments(existing: StateDocument | undefined, candidate: StateDocument): StateDocument {
+  if (existing !== undefined && existing.deviceId !== candidate.deviceId) throw new TypeError("device IDs must match");
+  const entries = new Map(existing?.entries.map((entry) => [entryKey(entry.key), entry]));
+  for (const entry of candidate.entries) {
+    const key = entryKey(entry.key);
+    const old = entries.get(key);
+    if (old !== undefined && old.revision === entry.revision && canonicalJson(old.value) !== canonicalJson(entry.value)) {
+      throw new DocumentConflictError(candidate.deviceId, entry.revision);
     }
-    next.delete(entryKey(old.key));
+    if (old === undefined || old.revision < entry.revision) entries.set(key, entry);
   }
-  if ([...next.values()].some((entry) => entry.revision <= existing.revision)) {
-    throw new DocumentConflictError(candidate.deviceId, candidate.revision);
-  }
+  return documentFromEntries(candidate.deviceId, [...entries.values()]);
 }

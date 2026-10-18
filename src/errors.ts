@@ -5,7 +5,7 @@ export class BbsyncError extends Error {
   }
 }
 
-/** A device document was forked or lost previously saved entries. */
+/** One writer assigned different values to the same key and revision. */
 export class DocumentConflictError extends BbsyncError {
   constructor(
     readonly deviceId: string,

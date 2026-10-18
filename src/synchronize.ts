@@ -1,11 +1,16 @@
-import { DocumentConflictError } from "./errors.js";
-import { assertDocumentSuccessor, documentsEqual, readDocuments, type StateStore } from "./store.js";
-import type { StateDocument, SynchronizeResult } from "./types.js";
+import { createScope, filterDocuments } from "./scope.js";
+import { documentsEqual, mergeDeviceDocuments, readDocuments, type StateStore } from "./store.js";
+import type { StateDocument, SynchronizeResult, SyncPolicy } from "./types.js";
+import { assertSyncPolicy } from "./validation.js";
 
-/** Copy each device's newest complete document in both directions. */
-export async function synchronizeStores(left: StateStore, right: StateStore): Promise<SynchronizeResult> {
-  const leftDocuments = new Map((await readDocuments(left)).map((doc) => [doc.deviceId, doc]));
-  const rightDocuments = new Map((await readDocuments(right)).map((doc) => [doc.deviceId, doc]));
+/** Transfer only in-scope entries, preserving every other saved entry. */
+export async function synchronizeStores(left: StateStore, right: StateStore, policy: SyncPolicy & { readonly now?: Date }): Promise<SynchronizeResult> {
+  assertSyncPolicy(policy);
+  const leftSource = await readDocuments(left);
+  const rightSource = await readDocuments(right);
+  const include = createScope([...leftSource, ...rightSource], policy, policy.now ?? new Date(), true);
+  const leftDocuments = new Map(filterDocuments(leftSource, include).map((doc) => [doc.deviceId, doc]));
+  const rightDocuments = new Map(filterDocuments(rightSource, include).map((doc) => [doc.deviceId, doc]));
   const toLeft: StateDocument[] = [];
   const toRight: StateDocument[] = [];
   for (const deviceId of new Set([...leftDocuments.keys(), ...rightDocuments.keys()])) {
@@ -13,13 +18,10 @@ export async function synchronizeStores(left: StateStore, right: StateStore): Pr
     const b = rightDocuments.get(deviceId);
     if (a === undefined) toLeft.push(b!);
     else if (b === undefined) toRight.push(a);
-    else if (a.revision === b.revision) {
-      if (!documentsEqual(a, b)) throw new DocumentConflictError(deviceId, a.revision);
-    } else {
-      const [older, newer] = a.revision < b.revision ? [a, b] : [b, a];
-      assertDocumentSuccessor(older, newer);
-      if (a.revision < b.revision) toLeft.push(b);
-      else toRight.push(a);
+    else {
+      const merged = mergeDeviceDocuments(a, b);
+      if (!documentsEqual(a, merged)) toLeft.push(b);
+      if (!documentsEqual(b, merged)) toRight.push(a);
     }
   }
   for (const document of toLeft) await left.writeDocument(document);

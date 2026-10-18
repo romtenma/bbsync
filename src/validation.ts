@@ -1,4 +1,4 @@
-import { SCHEMA_VERSION, type FavoriteLevel, type StateChange, type StateDocument, type StateEntry } from "./types.js";
+import { SCHEMA_VERSION, type FavoriteLevel, type StateChange, type StateDocument, type StateEntry, type SyncPolicy } from "./types.js";
 
 export function assertDeviceId(value: unknown): asserts value is string {
   if (typeof value !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value) ||
@@ -27,6 +27,12 @@ export function assertFavoriteLevel(value: unknown): asserts value is FavoriteLe
   if (value > 5) throw new TypeError("favorite level must be 1-5");
 }
 
+export function assertSyncPolicy(policy: SyncPolicy): void {
+  assertInteger(policy.syncLevel, 1);
+  if (policy.syncLevel > 5) throw new TypeError("syncLevel must be 1-5");
+  if (policy.historyRetentionMs !== undefined) assertInteger(policy.historyRetentionMs, 0);
+}
+
 function objectWithFields(value: unknown, required: string[], optional: string[] = []): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("expected a JSON object");
   const object = value as Record<string, unknown>;
@@ -41,14 +47,15 @@ export function assertChange(input: unknown, withRevision = false): asserts inpu
   const change = objectWithFields(input, withRevision ? ["key", "value", "revision"] : ["key", "value"]);
   const { key, value } = change;
   if (!Array.isArray(key)) throw new TypeError("key must be an array");
-  const length = key[0] === "filter" ? 4 : key[0] === "post" ? 3 : 2;
+  const length = key[0] === "tabs" ? 1 : key[0] === "filter" ? 4 : key[0] === "post" ? 3 : 2;
   if (key.length !== length) throw new TypeError("invalid key length");
-  assertNonEmptyString(key[1], "threadId or scope");
+  if (key[0] !== "tabs") assertNonEmptyString(key[1], "threadId or scope");
   switch (key[0]) {
     case "metadata":
     case "view":
     case "count":
     case "favorite":
+    case "tabs":
       break;
     case "post":
       assertInteger(key[2], 1);
@@ -95,6 +102,31 @@ export function assertChange(input: unknown, withRevision = false): asserts inpu
       if (typeof filter.isRegex !== "boolean") throw new TypeError("isRegex must be a boolean");
       assertDateTime(filter.updatedAt);
       if (Object.hasOwn(filter, "hitAt")) assertDateTime(filter.hitAt);
+      break;
+    }
+    case "tabs": {
+      const layout = objectWithFields(value, ["tabs", "groups"]);
+      if (!Array.isArray(layout.tabs) || !Array.isArray(layout.groups)) throw new TypeError("tabs and groups must be arrays");
+      const groups = new Set<string>();
+      for (const item of layout.groups) {
+        const group = objectWithFields(item, ["id", "name"]);
+        assertNonEmptyString(group.id, "group.id");
+        assertNonEmptyString(group.name, "group.name");
+        if (groups.has(group.id)) throw new TypeError("duplicate group id");
+        groups.add(group.id);
+      }
+      const tabs = new Set<string>();
+      for (const item of layout.tabs) {
+        const tab = objectWithFields(item, ["id", "threadId"], ["groupId"]);
+        assertNonEmptyString(tab.id, "tab.id");
+        assertNonEmptyString(tab.threadId, "tab.threadId");
+        if (tabs.has(tab.id)) throw new TypeError("duplicate tab id");
+        tabs.add(tab.id);
+        if (Object.hasOwn(tab, "groupId")) {
+          assertNonEmptyString(tab.groupId, "tab.groupId");
+          if (!groups.has(tab.groupId)) throw new TypeError("tab groupId must reference a group");
+        }
+      }
       break;
     }
   }

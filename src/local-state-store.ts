@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { DocumentConflictError } from "./errors.js";
-import { assertDocumentSuccessor, documentsEqual, type StateStore } from "./store.js";
+import { documentsEqual, mergeDeviceDocuments, type StateStore } from "./store.js";
 import type { StateDocument } from "./types.js";
 import { assertDeviceId, assertDocument, assertNonEmptyString } from "./validation.js";
 
@@ -59,18 +58,12 @@ export class LocalStateStore implements StateStore {
   private async writeWithoutLock(document: StateDocument): Promise<void> {
     await this.listDocuments();
     const existing = await this.readDocument(document.deviceId);
-    if (existing !== undefined) {
-      if (existing.revision > document.revision) return;
-      if (existing.revision === document.revision) {
-        if (documentsEqual(existing, document)) return;
-        throw new DocumentConflictError(document.deviceId, document.revision);
-      }
-      assertDocumentSuccessor(existing, document);
-    }
+    const merged = mergeDeviceDocuments(existing, document);
+    if (existing !== undefined && documentsEqual(existing, merged)) return;
     await mkdir(join(this.rootDirectory, "devices"), { recursive: true });
     const path = this.documentPath(document.deviceId);
     const temporary = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(document)}\n`, { encoding: "utf8", flag: "wx" });
+    await writeFile(temporary, `${JSON.stringify(merged)}\n`, { encoding: "utf8", flag: "wx" });
     try {
       await rename(temporary, path);
     } catch (error) {

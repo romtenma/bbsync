@@ -1,30 +1,36 @@
 import { compareStrings } from "./encoding.js";
 import { mergeDocuments, projectFilters, projectThreads } from "./project.js";
+import { canWrite, createScope, favoriteThreads, filterDocuments } from "./scope.js";
 import { entryKey, readDocuments, type StateStore } from "./store.js";
 import { synchronizeStores } from "./synchronize.js";
 import {
-  SCHEMA_VERSION, type FavoriteLevel, type FilterEntry, type FilterValue,
-  type StateChange, type StateEntry, type SynchronizeResult, type ThreadState,
+  DEFAULT_HISTORY_RETENTION_MS, SCHEMA_VERSION, type FavoriteLevel, type FilterEntry, type FilterValue,
+  type StateChange, type StateEntry, type SynchronizeResult, type ThreadState, type SyncLevel, type SyncPolicy, type TabState,
 } from "./types.js";
-import { assertChange, assertDeviceId, assertFavoriteLevel, assertInteger, assertNonEmptyString } from "./validation.js";
+import { assertChange, assertDeviceId, assertFavoriteLevel, assertInteger, assertNonEmptyString, assertSyncPolicy } from "./validation.js";
 
-export interface BbsSyncOptions {
+export interface BbsSyncOptions extends SyncPolicy {
   readonly storage: StateStore;
   readonly deviceId: string;
-  /** Used only for display timestamps, never conflict resolution. */
+  /** Used for display timestamps and history cutoff, never revision ordering. */
   readonly clock?: () => Date;
 }
 
 export class BbsSync {
   readonly storage: StateStore;
   readonly deviceId: string;
+  readonly syncLevel: SyncLevel;
+  readonly historyRetentionMs: number;
   private readonly clock: () => Date;
   private updateQueue: Promise<void> = Promise.resolve();
 
   constructor(options: BbsSyncOptions) {
     assertDeviceId(options.deviceId);
+    assertSyncPolicy(options);
     this.storage = options.storage;
     this.deviceId = options.deviceId;
+    this.syncLevel = options.syncLevel;
+    this.historyRetentionMs = options.historyRetentionMs ?? DEFAULT_HISTORY_RETENTION_MS;
     this.clock = options.clock ?? (() => new Date());
   }
 
@@ -41,18 +47,20 @@ export class BbsSync {
     const copy = structuredClone(changes);
     const operation = this.updateQueue.then(async () => {
       const documents = await readDocuments(this.storage);
+      const favorites = favoriteThreads(documents);
+      for (const change of copy) if (change.key[0] === "favorite" && change.value !== null) favorites.add(change.key[1]);
+      const allowed = copy.filter((change) => canWrite(change, this, favorites));
+      if (allowed.length === 0) return;
       let maximum = 0;
       for (const document of documents) maximum = Math.max(maximum, document.revision);
       if (maximum === Number.MAX_SAFE_INTEGER) throw new RangeError("logical revision exhausted; update cannot be saved");
       const revision = maximum + 1;
-      const previous = documents.find((document) => document.deviceId === this.deviceId);
-      const entries = new Map<string, StateEntry>(previous?.entries.map((entry) => [entryKey(entry.key), entry]));
-      for (const change of copy) entries.set(entryKey(change.key), { ...change, revision });
+      const entries: StateEntry[] = allowed.map((change) => ({ ...change, revision }));
       await this.storage.writeDocument({
         v: SCHEMA_VERSION,
         deviceId: this.deviceId,
         revision,
-        entries: [...entries.values()].sort((a, b) => compareStrings(entryKey(a.key), entryKey(b.key))),
+        entries: entries.sort((a, b) => compareStrings(entryKey(a.key), entryKey(b.key))),
       });
     });
     this.updateQueue = operation.catch(() => undefined);
@@ -112,8 +120,22 @@ export class BbsSync {
     return this.update([{ key: ["filter", scope, targetType, target], value: null }]);
   }
 
+  async setTabs(value: TabState): Promise<void> {
+    return this.update([{ key: ["tabs"], value }]);
+  }
+
+  async clearTabs(): Promise<void> {
+    return this.update([{ key: ["tabs"], value: null }]);
+  }
+
+  async getTabs(): Promise<TabState | undefined> {
+    if (this.syncLevel < 4) return undefined;
+    const value = (await this.readScopedEntries()).get(entryKey(["tabs"]))?.value;
+    return value === null || value === undefined ? undefined : value as TabState;
+  }
+
   async getStates(): Promise<ReadonlyMap<string, ThreadState>> {
-    return projectThreads(mergeDocuments(await readDocuments(this.storage)));
+    return projectThreads(await this.readScopedEntries(), this.syncLevel >= 5);
   }
 
   async getThreadState(threadId: string): Promise<ThreadState | undefined> {
@@ -121,13 +143,19 @@ export class BbsSync {
     return (await this.getStates()).get(threadId);
   }
 
-  async getFilters(scope?: string): Promise<readonly FilterEntry[]> {
+  async getFilters(scope?: string): Promise<readonly FilterEntry[] | undefined> {
+    if (this.syncLevel < 3) return undefined;
     if (scope !== undefined) assertNonEmptyString(scope, "scope");
-    return projectFilters(mergeDocuments(await readDocuments(this.storage)), scope);
+    return projectFilters(await this.readScopedEntries(), scope);
   }
 
   async synchronizeWith(remote: StateStore): Promise<SynchronizeResult> {
     await this.updateQueue;
-    return synchronizeStores(this.storage, remote);
+    return synchronizeStores(this.storage, remote, { syncLevel: this.syncLevel, historyRetentionMs: this.historyRetentionMs, now: this.clock() });
+  }
+
+  private async readScopedEntries() {
+    const documents = await readDocuments(this.storage);
+    return mergeDocuments(filterDocuments(documents, createScope(documents, this, this.clock())));
   }
 }

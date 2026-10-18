@@ -17,7 +17,7 @@ async function setup(t: { after: (cleanup: () => Promise<void>) => void }) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const stores = ["a", "b", "c"].map((name) => new LocalStateStore(join(root, name)));
   const [a, b, c] = stores.map((storage, index) => new BbsSync({
-    storage, deviceId: ["desktop", "mobile", "tablet"][index]!, clock: () => new Date(date),
+    storage, deviceId: ["desktop", "mobile", "tablet"][index]!, syncLevel: 5, clock: () => new Date(date),
   }));
   return { a: a!, b: b!, c: c!, left: stores[0]!, right: stores[1]!, third: stores[2]! };
 }
@@ -107,13 +107,13 @@ test("null deletes survive stale offline copies and later explicit updates resto
 
 test("logical revisions preserve observed order despite clock reversal or future timestamps", async (t) => {
   const { left, right } = await setup(t);
-  const a = new BbsSync({ storage: left, deviceId: "desktop", clock: () => new Date("2099-01-01T00:00:00.000Z") });
-  const b = new BbsSync({ storage: right, deviceId: "mobile", clock: () => new Date("2000-01-01T00:00:00.000Z") });
+  const a = new BbsSync({ storage: left, deviceId: "desktop", syncLevel: 5, clock: () => new Date("2099-01-01T00:00:00.000Z") });
+  const b = new BbsSync({ storage: right, deviceId: "mobile", syncLevel: 5, clock: () => new Date("2000-01-01T00:00:00.000Z") });
   await a.setFilter("scope", "ID", "user", "OMIT");
   await a.synchronizeWith(right);
   await b.setFilter("scope", "ID", "user", "NOP");
   await b.synchronizeWith(left);
-  assert.equal((await a.getFilters())[0]?.effect, "NOP");
+  assert.equal((await a.getFilters())?.[0]?.effect, "NOP");
   assert.equal((await right.readDocument("mobile"))!.revision, 2);
 });
 
@@ -144,7 +144,7 @@ test("batch updates are atomic, use one revision, and serialize rapid local chan
   assert.ok((await left.readDocument("desktop"))!.entries.every((entry) => entry.revision === 1));
   await Promise.all(Array.from({ length: 20 }, (_, n) => a.recordPost(thread, n + 1)));
   assert.equal((await left.readDocument("desktop"))!.revision, 21);
-  assert.equal((await a.getThreadState(thread))!.postPositions.length, 20);
+  assert.equal((await a.getThreadState(thread))!.postPositions!.length, 20);
   const unchanged = await left.readDocument("desktop");
   await a.update([]);
   await assert.rejects(() => a.update([
@@ -160,7 +160,7 @@ test("updates recover from failed storage writes without losing previous state",
     listDocuments: () => left.listDocuments(), readDocument: (id) => left.readDocument(id),
     writeDocument: (doc) => { if (fail) { fail = false; return Promise.reject(new Error("offline")); } return left.writeDocument(doc); },
   };
-  const client = new BbsSync({ storage, deviceId: "desktop" });
+  const client = new BbsSync({ storage, deviceId: "desktop", syncLevel: 5 });
   await assert.rejects(() => client.setFavorite(thread, 3), /offline/);
   await client.setFavorite(thread, 5);
   assert.equal((await client.getThreadState(thread))?.favoriteLevel, 5);
@@ -173,16 +173,18 @@ test("sync detects forks before copying any documents", async (t) => {
   await right.writeDocument({ v: 3, deviceId: "desktop", revision: 1,
     entries: [{ key: ["favorite", thread], value: 5, revision: 1 }] });
   await b.recordPost(thread, 10);
-  await assert.rejects(() => synchronizeStores(left, right), DocumentConflictError);
+  await assert.rejects(() => synchronizeStores(left, right, { syncLevel: 5, now: new Date(date) }), DocumentConflictError);
   assert.deepEqual(await left.listDocuments(), ["desktop"]);
 });
 
-test("newer forked documents cannot silently discard deletions", async (t) => {
+test("partial synchronization cannot discard existing deletion markers", async (t) => {
   const { a, left, right } = await setup(t);
   await a.clearFavorite(thread);
   await right.writeDocument({ v: 3, deviceId: "desktop", revision: 2,
     entries: [{ key: ["post", thread, 10], value: true, revision: 2 }] });
-  await assert.rejects(() => synchronizeStores(left, right), DocumentConflictError);
+  await synchronizeStores(left, right, { syncLevel: 5, now: new Date(date) });
+  assert.deepEqual(await left.readDocument("desktop"), await right.readDocument("desktop"));
+  assert.ok((await left.readDocument("desktop"))!.entries.some((entry) => entry.key[0] === "favorite" && entry.value === null));
 });
 
 test("validation rejects malformed values and exhausted logical revisions", async (t) => {
@@ -206,9 +208,9 @@ test("filter tuple keys remain distinct when their strings contain separators", 
   const { a } = await setup(t);
   await a.setFilter("a/b", "c", "d", "OMIT");
   await a.setFilter("a", "b/c", "d", "NOP");
-  assert.equal((await a.getFilters()).length, 2);
+  assert.equal((await a.getFilters())!.length, 2);
   await a.clearFilter("a/b", "c", "d");
-  assert.equal((await a.getFilters())[0]?.effect, "NOP");
+  assert.equal((await a.getFilters())?.[0]?.effect, "NOP");
 });
 
 test("typed setting helpers reject explicit null instead of performing a deletion", async (t) => {

@@ -1,6 +1,6 @@
 # bbsync
 
-掲示板クライアントの閲覧状態・お気に入り・書き込み位置・フィルターを端末間で共有する Node.js モジュールです。
+掲示板クライアントの閲覧状態・お気に入り・ミュート設定・タブ・書き込み履歴を端末間で共有する Node.js モジュールです。
 端末ごとの現在値を JSON に保存し、項目ごとに新しい更新を採用します。仕様は [同期プロトコル v3](docs/protocol.md) にまとめています。
 
 ## 使い方
@@ -15,6 +15,8 @@ import { BbsSync, LocalStateStore } from "@romtenma/bbsync";
 const sync = new BbsSync({
   storage: new LocalStateStore("./bbsync-v3"),
   deviceId: "desktop-main", // 初回に生成して保存。端末ごとに別の値を使う
+  syncLevel: 3, // 必須。このクライアントはレベル1〜3を扱う
+  historyRetentionMs: 30 * 24 * 60 * 60 * 1_000, // 省略時も30日
 });
 const threadId = "egg.5ch.net/software/1234567890";
 
@@ -23,7 +25,6 @@ await sync.setThreadMetadata(threadId, "スレッドのタイトル",
 await sync.recordThreadView(threadId, 125, 110); // 最後と最初の表示レス番号
 await sync.recordResponseCount(threadId, 130);
 await sync.setFavorite(threadId, 3);
-await sync.recordPost(threadId, 126);
 await sync.setFilter("egg.5ch.net/software", "ID", "ABCDEFG", "OMIT");
 
 await sync.synchronizeWith(new LocalStateStore("./shared-bbsync-v3"));
@@ -31,7 +32,21 @@ const threads = await sync.getStates();
 const filters = await sync.getFilters();
 ```
 
-同期結果をクライアントへ反映する間は、変更通知から同じ更新を再送しないようにしてください。
+同期結果の反映は設定レベルの範囲だけに行い、変更通知から同じ更新を再送しないようにしてください。
+
+## 同期レベル
+
+レベルは累積です。対象外のデータは更新・削除・転送せず、保存済みの値もそのまま保持します。
+
+| レベル | 追加される同期対象 |
+| --- | --- |
+| 1 | お気に入りと、そのスレッドの閲覧状態 |
+| 2 | お気に入り以外も含む最近の閲覧履歴と閲覧状態 |
+| 3 | ID・ワードなどのミュート設定（フィルター） |
+| 4 | 開いているタブ・タブグループ |
+| 5 | 書き込み履歴（自分の書き込み位置） |
+
+最近の履歴は `historyRetentionMs` で指定し、既定は直近30日です。お気に入りの閲覧状態は期間で制限しません。期間外の保存データを削除する設定ではありません。お気に入り自体の重要度 `favoriteLevel`（1〜5）とは別の設定です。
 
 ## API
 
@@ -44,19 +59,24 @@ const filters = await sync.getFilters();
 | お気に入りの設定・解除 | `setFavorite(threadId, level = 1)` / `clearFavorite(threadId)` |
 | 自分の書き込み位置の記録・削除 | `recordPost(threadId, position)` / `clearPost(threadId, position)` |
 | フィルターの設定・解除 | `setFilter(scope, targetType, target, effect, options?)` / `clearFilter(scope, targetType, target)` |
+| タブ・グループの設定・取得・解除 | `setTabs({ tabs, groups })` / `getTabs()` / `clearTabs()` |
 | 状態の取得 | `getStates()` / `getThreadState(threadId)` / `getFilters(scope?)` |
 | 一括更新 | `update(changes)`。同じキーの重複はエラー、空配列は何もしない |
 | 双方向同期 | `synchronizeWith(store)`。コピーした文書数を `{ copiedToLeft, copiedToRight }` で返す |
 
-更新メソッドは `Promise<void>` を返します。フィルターの `options` は `isRegex`（既定 `false`）、`updatedAt`（既定は現在時刻）、`hitAt`（任意）です。日時は表示用で、更新の競合判定には使いません。
+更新メソッドは `Promise<void>` を返し、レベル外の項目は一括更新でも無視します。レベル1で閲覧状態を記録する際は、先にお気に入りを設定するか、一括更新に含めてください。
+
+レベル3未満の `getFilters()` とレベル4未満の `getTabs()` は `undefined` を返します。レベル5未満ではスレッドの `postPositions` を省略します。これらの欠落をクライアント側の削除指示と解釈しないでください。
+
+フィルターの `options` は `isRegex`（既定 `false`）、`updatedAt`（既定は現在時刻）、`hitAt`（任意）です。日時は更新の競合判定に使いません。
 
 ## 保存と拡張
 
-ファイルは `<root>/devices/<deviceId>.json` です。同じ項目の更新は置き換えるためイベント履歴は増えません。削除情報は残し、自動期限切れや件数制限は設けません。容量と転送量は端末数と、一度でも記録したキーの数に応じて増えます。
+ファイルは `<root>/devices/<deviceId>.json` です。同期対象の項目だけを転送し、保存先では項目ごとに統合します。省略されたキーは削除しません。同じ項目の更新は置き換えるためイベント履歴は増えません。削除情報は残し、自動削除や件数制限は設けません。
 
 1つのディレクトリには1つの `LocalStateStore` インスタンスを使い、同じ `deviceId` の更新元も1つにします。端末IDには保存した UUID を推奨します。端末の複製やデータの作り直し時には新しいIDを生成してください。
 
-独自ストレージは `StateStore` の3操作を実装します。共通契約テストは [src/state-store.contract.ts](src/state-store.contract.ts) にあります。ファイルの分岐・過去のキーの欠落は `DocumentConflictError`、不正なデータは `TypeError` または JSON パースエラーとして報告します。
+独自ストレージは `StateStore` の3操作を実装します。共通契約テストは [src/state-store.contract.ts](src/state-store.contract.ts) にあります。同じ端末・キー・revision の異なる値は `DocumentConflictError`、不正なデータは `TypeError` または JSON パースエラーとして報告します。
 
 ## v2 からの変更
 

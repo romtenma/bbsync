@@ -1,6 +1,5 @@
 import { compareStrings } from "./encoding.js";
-import { DocumentConflictError } from "./errors.js";
-import { assertDocumentSuccessor, documentsEqual, entryKey } from "./store.js";
+import { entryKey, mergeDeviceDocuments } from "./store.js";
 import type {
   FavoriteLevel, FilterEntry, FilterValue, MergedEntry, StateDocument,
   ThreadMetadata, ThreadState, ThreadView,
@@ -13,16 +12,7 @@ export function mergeDocuments(documents: readonly StateDocument[]): ReadonlyMap
   for (const document of documents) {
     assertDocument(document);
     const previous = latest.get(document.deviceId);
-    if (previous !== undefined) {
-      if (previous.revision === document.revision) {
-        if (!documentsEqual(previous, document)) throw new DocumentConflictError(document.deviceId, document.revision);
-        continue;
-      }
-      const [older, newer] = previous.revision < document.revision ? [previous, document] : [document, previous];
-      assertDocumentSuccessor(older, newer);
-      if (previous.revision > document.revision) continue;
-    }
-    latest.set(document.deviceId, document);
+    latest.set(document.deviceId, mergeDeviceDocuments(previous, document));
   }
   const merged = new Map<string, MergedEntry>();
   for (const document of latest.values()) {
@@ -38,15 +28,15 @@ export function mergeDocuments(documents: readonly StateDocument[]): ReadonlyMap
   return new Map([...merged].sort(([a], [b]) => compareStrings(a, b)));
 }
 
-export function projectThreads(entries: ReadonlyMap<string, MergedEntry>): ReadonlyMap<string, ThreadState> {
-  type MutableThread = { -readonly [K in keyof ThreadState]: ThreadState[K] } & { postPositions: number[] };
+export function projectThreads(entries: ReadonlyMap<string, MergedEntry>, includePosts = true): ReadonlyMap<string, ThreadState> {
+  type MutableThread = { -readonly [K in keyof ThreadState]: ThreadState[K] } & { postPositions?: number[] };
   const threads = new Map<string, MutableThread>();
   for (const { key, value } of entries.values()) {
-    if (key[0] === "filter" || value === null) continue;
+    if (key[0] === "filter" || key[0] === "tabs" || value === null) continue;
     const threadId = key[1];
     let thread = threads.get(threadId);
     if (thread === undefined) {
-      thread = { threadId, postPositions: [] };
+      thread = { threadId, ...(includePosts ? { postPositions: [] } : {}) };
       threads.set(threadId, thread);
     }
     switch (key[0]) {
@@ -65,10 +55,10 @@ export function projectThreads(entries: ReadonlyMap<string, MergedEntry>): Reado
       }
       case "count": thread.responseCount = value as number; break;
       case "favorite": thread.favoriteLevel = value as FavoriteLevel; break;
-      case "post": thread.postPositions.push(key[2]); break;
+      case "post": thread.postPositions?.push(key[2]); break;
     }
   }
-  for (const thread of threads.values()) thread.postPositions.sort((a, b) => a - b);
+  for (const thread of threads.values()) thread.postPositions?.sort((a, b) => a - b);
   return new Map([...threads].sort(([a], [b]) => compareStrings(a, b)));
 }
 
