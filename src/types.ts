@@ -1,285 +1,54 @@
-export const EVENT_SCHEMA_VERSION = 2 as const;
-
-export type EventSchemaVersion = typeof EVENT_SCHEMA_VERSION;
+export const SCHEMA_VERSION = 3 as const;
 
 export type FavoriteLevel = 1 | 2 | 3 | 4 | 5;
-
-export interface SegmentRef {
-  readonly deviceId: string;
-  readonly segmentId: string;
-}
-
-export interface SnapshotFavorite {
-  readonly cleared: boolean;
-  readonly level?: FavoriteLevel;
-  readonly occurredAt: string;
-  readonly deviceId: string;
-  readonly eventId: string;
-}
-
-export interface SnapshotViewed {
-  readonly occurredAt: string;
-  readonly deviceId: string;
-  readonly eventId: string;
-  /** First position visible in the viewport, when supplied by the adapter. */
-  readonly firstPosition?: number;
-}
-
-/** The latest marker that clears a thread from browsing history. */
-export interface SnapshotHistoryCleared {
-  readonly occurredAt: string;
-  readonly deviceId: string;
-  readonly eventId: string;
-}
-
-/** A tombstone for a deleted own-post position. */
-export interface SnapshotPostCleared {
-  readonly position: number;
-  readonly occurredAt: string;
-  readonly deviceId: string;
-  readonly eventId: string;
-}
-
-/** Conflict-resolution metadata for an active own-post position. */
-export interface SnapshotPostRecorded {
-  readonly position: number;
-  readonly occurredAt: string;
-  readonly deviceId: string;
-  readonly eventId: string;
-}
-
-export interface SnapshotThreadMetadata {
-  readonly title: string;
-  readonly url: string;
-  readonly occurredAt: string;
-  readonly deviceId: string;
-  readonly eventId: string;
-}
-
-export interface SnapshotThreadState {
-  readonly threadId: string;
-  readonly metadata?: SnapshotThreadMetadata;
-  readonly lastReadPosition?: number;
-  /** First position from the latest viewed viewport, when supplied. */
-  readonly firstReadPosition?: number;
-  readonly responseCount?: number;
-  readonly lastViewed?: SnapshotViewed;
-  readonly historyCleared?: SnapshotHistoryCleared;
-  readonly favorite?: SnapshotFavorite;
-  readonly postPositions: readonly number[];
-  /** Latest recording marker for active post positions. Added compatibly in v2. */
-  readonly postRecords?: readonly SnapshotPostRecorded[];
-  /** Latest deletion marker for each deleted post position. */
-  readonly postCleared?: readonly SnapshotPostCleared[];
-}
-
-/** A browser-defined filter target type. */
 export type FilterTargetType = string;
-
-/** A browser-defined filter effect. */
 export type FilterEffect = string;
 
-export interface SnapshotFilter {
-  readonly scope: string;
-  readonly targetType: FilterTargetType;
-  readonly target: string;
-  readonly effect: FilterEffect;
-  /** Whether target is interpreted as a regular expression. Omitted means false. */
-  readonly isRegex?: boolean;
-  readonly updatedAt: string;
-  readonly hitAt?: string;
-  readonly cleared: boolean;
-  readonly deviceId: string;
-  readonly eventId: string;
-}
-
-export interface SegmentCoverage {
-  readonly segmentId: string;
-  readonly eventCount: number;
-}
-
-export interface StateSnapshot {
-  readonly v: EventSchemaVersion;
-  readonly deviceId: string;
-  readonly revision: number;
-  readonly createdAt: string;
-  readonly coveredSegments: readonly SegmentCoverage[];
-  readonly threads: readonly SnapshotThreadState[];
-  readonly filters: readonly SnapshotFilter[];
-}
-
-interface BaseEvent {
-  readonly v: EventSchemaVersion;
-  readonly id: string;
-  readonly deviceId: string;
-  readonly occurredAt: string;
-}
-
-interface BaseThreadEvent extends BaseEvent {
-  readonly threadId: string;
-}
-
-export interface ThreadViewedEvent extends BaseThreadEvent {
-  readonly type: "thread.viewed";
-  readonly position: number;
-  /** First position visible in the viewport, when supplied by the adapter. */
-  readonly firstPosition?: number;
-}
-
-export interface ThreadHistoryClearedEvent extends BaseThreadEvent {
-  readonly type: "thread.history.cleared";
-}
-
-export interface ThreadMetadataUpdatedEvent extends BaseThreadEvent {
-  readonly v: typeof EVENT_SCHEMA_VERSION;
-  readonly type: "thread.metadata.updated";
+export interface ThreadMetadata {
   readonly title: string;
   readonly url: string;
 }
 
-export interface ThreadResponseCountObservedEvent extends BaseThreadEvent {
-  readonly type: "thread.response-count.observed";
-  readonly responseCount: number;
-}
-
-export interface FavoriteSetEvent extends BaseThreadEvent {
-  readonly type: "thread.favorite.set";
-  readonly level: FavoriteLevel;
-}
-
-export interface FavoriteClearedEvent extends BaseThreadEvent {
-  readonly type: "thread.favorite.cleared";
-}
-
-export interface PostRecordedEvent extends BaseThreadEvent {
-  readonly type: "thread.post.recorded";
-  readonly position: number;
-}
-
-export interface PostClearedEvent extends BaseThreadEvent {
-  readonly type: "thread.post.cleared";
-  readonly position: number;
-}
-
-export interface FilterSetEvent extends BaseEvent {
-  readonly type: "filter.set";
-  readonly scope: string;
-  readonly targetType: FilterTargetType;
-  readonly target: string;
-  readonly effect: FilterEffect;
-  /** Whether target is interpreted as a regular expression. Omitted means false. */
-  readonly isRegex?: boolean;
-  readonly updatedAt: string;
-  readonly hitAt?: string | null;
-}
-
-export interface FilterClearedEvent extends BaseEvent {
-  readonly type: "filter.cleared";
-  readonly scope: string;
-  readonly targetType: FilterTargetType;
-  readonly target: string;
-  readonly updatedAt: string;
-}
-
-export type SyncEvent =
-  | ThreadMetadataUpdatedEvent
-  | ThreadViewedEvent
-  | ThreadHistoryClearedEvent
-  | ThreadResponseCountObservedEvent
-  | FavoriteSetEvent
-  | FavoriteClearedEvent
-  | PostRecordedEvent
-  | PostClearedEvent
-  | FilterSetEvent
-  | FilterClearedEvent;
-
-interface BaseEventInput {
-  readonly occurredAt?: string;
-}
-
-interface BaseThreadEventInput extends BaseEventInput {
-  readonly threadId: string;
-}
-
-export interface ThreadViewedInput extends BaseThreadEventInput {
-  readonly type: "thread.viewed";
+export interface ThreadView {
   readonly position: number;
   readonly firstPosition?: number;
+  readonly viewedAt: string;
 }
 
-export interface ThreadHistoryClearedInput extends BaseThreadEventInput {
-  readonly type: "thread.history.cleared";
-}
-
-export interface ThreadMetadataUpdatedInput extends BaseThreadEventInput {
-  readonly type: "thread.metadata.updated";
-  readonly title: string;
-  readonly url: string;
-}
-
-export interface ThreadResponseCountObservedInput extends BaseThreadEventInput {
-  readonly type: "thread.response-count.observed";
-  readonly responseCount: number;
-}
-
-export interface FavoriteSetInput extends BaseThreadEventInput {
-  readonly type: "thread.favorite.set";
-  readonly level?: FavoriteLevel;
-}
-
-export interface FavoriteClearedInput extends BaseThreadEventInput {
-  readonly type: "thread.favorite.cleared";
-}
-
-export interface PostRecordedInput extends BaseThreadEventInput {
-  readonly type: "thread.post.recorded";
-  readonly position: number;
-}
-
-export interface PostClearedInput extends BaseThreadEventInput {
-  readonly type: "thread.post.cleared";
-  readonly position: number;
-}
-
-export interface FilterSetInput extends BaseEventInput {
-  readonly type: "filter.set";
-  readonly scope: string;
-  readonly targetType: FilterTargetType;
-  readonly target: string;
-  readonly effect: FilterEffect;
-  readonly isRegex?: boolean;
-  readonly updatedAt?: string;
-  readonly hitAt?: string | null;
-}
-
-export interface FilterClearedInput extends BaseEventInput {
-  readonly type: "filter.cleared";
-  readonly scope: string;
-  readonly targetType: FilterTargetType;
-  readonly target: string;
-  readonly updatedAt?: string;
-}
-
-export type SyncEventInput =
-  | ThreadMetadataUpdatedInput
-  | ThreadViewedInput
-  | ThreadHistoryClearedInput
-  | ThreadResponseCountObservedInput
-  | FavoriteSetInput
-  | FavoriteClearedInput
-  | PostRecordedInput
-  | PostClearedInput
-  | FilterSetInput
-  | FilterClearedInput;
-
-export interface FilterEntry {
-  readonly scope: string;
-  readonly targetType: FilterTargetType;
-  readonly target: string;
+export interface FilterValue {
   readonly effect: FilterEffect;
   readonly isRegex: boolean;
+  /** Display metadata only; conflict resolution uses the logical revision. */
   readonly updatedAt: string;
   readonly hitAt?: string;
+}
+
+/** A null value clears the entire item. Missing keys make no change. */
+export type StateChange =
+  | { readonly key: readonly ["metadata", string]; readonly value: ThreadMetadata | null }
+  | { readonly key: readonly ["view", string]; readonly value: ThreadView | null }
+  | { readonly key: readonly ["count", string]; readonly value: number | null }
+  | { readonly key: readonly ["favorite", string]; readonly value: FavoriteLevel | null }
+  | { readonly key: readonly ["post", string, number]; readonly value: true | null }
+  | { readonly key: readonly ["filter", string, FilterTargetType, string]; readonly value: FilterValue | null };
+
+export type StateKey = StateChange["key"];
+export type StateEntry = StateChange & { readonly revision: number };
+
+/** One writer owns each device document and retains every key it has written. */
+export interface StateDocument {
+  readonly v: typeof SCHEMA_VERSION;
+  readonly deviceId: string;
+  readonly revision: number;
+  readonly entries: readonly StateEntry[];
+}
+
+export type MergedEntry = StateEntry & { readonly deviceId: string };
+
+export interface FilterEntry extends FilterValue {
+  readonly scope: string;
+  readonly targetType: FilterTargetType;
+  readonly target: string;
 }
 
 export interface ThreadState {
@@ -297,16 +66,4 @@ export interface ThreadState {
 export interface SynchronizeResult {
   readonly copiedToLeft: number;
   readonly copiedToRight: number;
-  readonly copiedSnapshotsToLeft: number;
-  readonly copiedSnapshotsToRight: number;
-}
-
-export const DEFAULT_MAX_GLOBAL_POST_POSITIONS = 1_000;
-export const DEFAULT_THREAD_RETENTION_PERIOD_MS = 30 * 24 * 60 * 60 * 1_000;
-
-export interface CompactOptions {
-  /** Maximum number of total post positions across all threads to retain. Defaults to 1,000. */
-  readonly maxGlobalPostPositions?: number;
-  /** Inactive thread retention period in milliseconds. Defaults to 30 days. */
-  readonly retentionPeriodMs?: number;
 }

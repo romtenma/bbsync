@@ -1,410 +1,121 @@
-import {
-  EVENT_SCHEMA_VERSION,
-  type FavoriteLevel,
-  type SegmentRef,
-  type SegmentCoverage,
-  type SnapshotThreadMetadata,
-  type SnapshotViewed,
-  type SnapshotFilter,
-  type SnapshotHistoryCleared,
-  type StateSnapshot,
-  type SyncEvent,
-} from "./types.js";
+import { SCHEMA_VERSION, type FavoriteLevel, type StateChange, type StateDocument, type StateEntry } from "./types.js";
 
-const SAFE_COMPONENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-
-export function assertSafeComponent(value: string, name: string): void {
-  if (!SAFE_COMPONENT.test(value)) {
-    throw new TypeError(
-      `${name} must contain only ASCII letters, digits, dot, underscore, or hyphen`,
-    );
+export function assertDeviceId(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value) ||
+    /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/.test(value)) {
+    throw new TypeError("deviceId must be 1-64 lowercase ASCII letters, digits, underscores or hyphens, and not a reserved filename");
   }
 }
 
-export function assertSegmentRef(ref: SegmentRef): void {
-  assertSafeComponent(ref.deviceId, "deviceId");
-  assertSafeComponent(ref.segmentId, "segmentId");
+export function assertNonEmptyString(value: unknown, name: string): asserts value is string {
+  if (typeof value !== "string" || value.length === 0) throw new TypeError(`${name} must be a non-empty string`);
 }
 
-export function assertEvent(value: unknown): asserts value is SyncEvent {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("event must be an object");
-  }
-
-  const event = value as Record<string, unknown>;
-  if (event.v !== EVENT_SCHEMA_VERSION) {
-    throw new TypeError(`unsupported event schema version: ${String(event.v)}`);
-  }
-
-  for (const field of ["id", "deviceId", "occurredAt"] as const) {
-    if (typeof event[field] !== "string" || event[field].length === 0) {
-      throw new TypeError(`event.${field} must be a non-empty string`);
-    }
-  }
-
-  assertSafeComponent(event.id as string, "event.id");
-  assertSafeComponent(event.deviceId as string, "event.deviceId");
-
-  if (Number.isNaN(Date.parse(event.occurredAt as string))) {
-    throw new TypeError("event.occurredAt must be a valid date-time string");
-  }
-
-  if (event.type !== "filter.set" && event.type !== "filter.cleared") {
-    if (typeof event.threadId !== "string" || event.threadId.length === 0) {
-      throw new TypeError("event.threadId must be a non-empty string");
-    }
-  } else {
-    assertFilterKey(event.scope, event.targetType, event.target);
-    if (event.type === "filter.set") {
-      assertFilterEffect(event.effect);
-      if (event.isRegex !== undefined && typeof event.isRegex !== "boolean") {
-        throw new TypeError("event.isRegex must be a boolean");
-      }
-    }
-    assertDateTime(event.updatedAt, "event.updatedAt");
-    if (event.type === "filter.set" && event.hitAt !== undefined && event.hitAt !== null) {
-      assertDateTime(event.hitAt, "event.hitAt");
-    }
-  }
-
-  switch (event.type) {
-    case "thread.metadata.updated":
-      assertThreadMetadata(event.title, event.url, "event");
-      break;
-    case "thread.viewed":
-      assertPosition(event.position, true);
-      if (event.firstPosition !== undefined) {
-        assertPosition(event.firstPosition, true);
-        if ((event.firstPosition as number) > (event.position as number)) {
-          throw new TypeError("event.firstPosition must be less than or equal to event.position");
-        }
-      }
-      break;
-    case "thread.history.cleared":
-      break;
-    case "thread.response-count.observed":
-      assertPosition(event.responseCount, true);
-      break;
-    case "thread.favorite.set":
-      assertFavoriteLevel(event.level);
-      break;
-    case "thread.favorite.cleared":
-      break;
-    case "thread.post.recorded":
-      assertPosition(event.position, false);
-      break;
-    case "thread.post.cleared":
-      assertPosition(event.position, false);
-      break;
-    case "filter.set":
-    case "filter.cleared":
-      break;
-    default:
-      throw new TypeError(`unsupported event type: ${String(event.type)}`);
+export function assertDateTime(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) ||
+    !Number.isFinite(Date.parse(value)) || new Date(value).toISOString() !== value) {
+    throw new TypeError("date-time must use YYYY-MM-DDTHH:mm:ss.sssZ");
   }
 }
 
-export function assertPosition(value: unknown, allowZero: boolean): void {
-  const minimum = allowZero ? 0 : 1;
-  if (!Number.isSafeInteger(value) || (value as number) < minimum) {
-    throw new TypeError(`position must be a safe integer greater than or equal to ${minimum}`);
-  }
-}
-
-export function assertThreadId(threadId: string): void {
-  if (typeof threadId !== "string" || threadId.length === 0) {
-    throw new TypeError("threadId must be a non-empty string");
-  }
-}
-
-export function assertSnapshot(value: unknown): asserts value is StateSnapshot {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("snapshot must be an object");
-  }
-  const snapshot = value as Record<string, unknown>;
-  if (snapshot.v !== EVENT_SCHEMA_VERSION) {
-    throw new TypeError(`unsupported snapshot schema version: ${String(snapshot.v)}`);
-  }
-  if (typeof snapshot.deviceId !== "string") {
-    throw new TypeError("snapshot.deviceId must be a string");
-  }
-  assertSafeComponent(snapshot.deviceId, "snapshot.deviceId");
-  if (!Number.isSafeInteger(snapshot.revision) || (snapshot.revision as number) < 1) {
-    throw new TypeError("snapshot.revision must be a positive safe integer");
-  }
-  if (typeof snapshot.createdAt !== "string" || Number.isNaN(Date.parse(snapshot.createdAt))) {
-    throw new TypeError("snapshot.createdAt must be a valid date-time string");
-  }
-  if (!Array.isArray(snapshot.threads)) {
-    throw new TypeError("snapshot.threads must be an array");
-  }
-  if (!Array.isArray(snapshot.coveredSegments)) {
-    throw new TypeError("snapshot.coveredSegments must be an array");
-  }
-  for (const coverage of snapshot.coveredSegments) {
-    assertSegmentCoverage(coverage);
-  }
-  for (const thread of snapshot.threads) {
-    assertSnapshotThread(thread);
-  }
-  if (!Array.isArray(snapshot.filters)) {
-    throw new TypeError("snapshot.filters must be an array");
-  }
-  for (const filter of snapshot.filters) {
-    assertSnapshotFilter(filter);
-  }
-}
-
-function assertSegmentCoverage(value: unknown): asserts value is SegmentCoverage {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("snapshot segment coverage must be an object");
-  }
-  const coverage = value as Record<string, unknown>;
-  assertSafeComponent(coverage.segmentId as string, "snapshot segmentId");
-  if (!Number.isSafeInteger(coverage.eventCount) || (coverage.eventCount as number) < 0) {
-    throw new TypeError("snapshot eventCount must be a non-negative safe integer");
-  }
-}
-
-function assertSnapshotThread(value: unknown): void {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("snapshot thread must be an object");
-  }
-  const thread = value as Record<string, unknown>;
-  assertThreadId(thread.threadId as string);
-  if (thread.metadata !== undefined) {
-    assertSnapshotThreadMetadata(thread.metadata);
-  }
-  if (
-    thread.lastReadPosition !== undefined &&
-    (!Number.isSafeInteger(thread.lastReadPosition) || (thread.lastReadPosition as number) < 0)
-  ) {
-    throw new TypeError("snapshot lastReadPosition must be a non-negative safe integer");
-  }
-  if (
-    thread.firstReadPosition !== undefined &&
-    (!Number.isSafeInteger(thread.firstReadPosition) || (thread.firstReadPosition as number) < 0)
-  ) {
-    throw new TypeError("snapshot firstReadPosition must be a non-negative safe integer");
-  }
-  if (
-    thread.firstReadPosition !== undefined &&
-    thread.lastReadPosition !== undefined &&
-    (thread.firstReadPosition as number) > (thread.lastReadPosition as number)
-  ) {
-    throw new TypeError("snapshot firstReadPosition must be less than or equal to lastReadPosition");
-  }
-  if (
-    thread.responseCount !== undefined &&
-    (!Number.isSafeInteger(thread.responseCount) || (thread.responseCount as number) < 0)
-  ) {
-    throw new TypeError("snapshot responseCount must be a non-negative safe integer");
-  }
-  if (thread.lastViewed !== undefined) {
-    assertSnapshotViewed(thread.lastViewed);
-  }
-  if (thread.historyCleared !== undefined) {
-    assertSnapshotHistoryCleared(thread.historyCleared);
-  }
-  if (!Array.isArray(thread.postPositions) || thread.postPositions.some(
-    (position) => !Number.isSafeInteger(position) || (position as number) < 1,
-  )) {
-    throw new TypeError("snapshot postPositions must contain positive safe integers");
-  }
-  if (thread.postRecords !== undefined) {
-    if (!Array.isArray(thread.postRecords)) {
-      throw new TypeError("snapshot postRecords must be an array");
-    }
-    for (const marker of thread.postRecords) {
-      assertSnapshotPostMarker(marker, "postRecords");
-    }
-  }
-  if (thread.postCleared !== undefined) {
-    if (!Array.isArray(thread.postCleared)) {
-      throw new TypeError("snapshot postCleared must be an array");
-    }
-    for (const marker of thread.postCleared) {
-      assertSnapshotPostMarker(marker, "postCleared");
-    }
-  }
-  if (thread.favorite !== undefined) {
-    if (typeof thread.favorite !== "object" || thread.favorite === null) {
-      throw new TypeError("snapshot favorite must be an object");
-    }
-    const favorite = thread.favorite as Record<string, unknown>;
-    if (typeof favorite.cleared !== "boolean") {
-      throw new TypeError("snapshot favorite.cleared must be boolean");
-    }
-    if (favorite.cleared) {
-      if (favorite.level !== undefined) {
-        throw new TypeError("cleared snapshot favorite must not have a level");
-      }
-    } else {
-      assertFavoriteLevel(favorite.level);
-    }
-    for (const field of ["occurredAt", "deviceId", "eventId"] as const) {
-      if (typeof favorite[field] !== "string" || favorite[field].length === 0) {
-        throw new TypeError(`snapshot favorite.${field} must be a non-empty string`);
-      }
-    }
-    if (Number.isNaN(Date.parse(favorite.occurredAt as string))) {
-      throw new TypeError("snapshot favorite.occurredAt must be a valid date-time string");
-    }
-    assertSafeComponent(favorite.deviceId as string, "snapshot favorite.deviceId");
-    assertSafeComponent(favorite.eventId as string, "snapshot favorite.eventId");
-  }
-}
-
-function assertSnapshotPostMarker(value: unknown, collectionName: string): void {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError(`snapshot ${collectionName} marker must be an object`);
-  }
-  const marker = value as Record<string, unknown>;
-  assertPosition(marker.position, false);
-  assertDateTime(marker.occurredAt, `snapshot ${collectionName}.occurredAt`);
-  for (const field of ["deviceId", "eventId"] as const) {
-    if (typeof marker[field] !== "string" || marker[field].length === 0) {
-      throw new TypeError(
-        `snapshot ${collectionName}.${field} must be a non-empty string`,
-      );
-    }
-    assertSafeComponent(
-      marker[field] as string,
-      `snapshot ${collectionName}.${field}`,
-    );
-  }
-}
-
-function assertSnapshotThreadMetadata(
-  value: unknown,
-): asserts value is SnapshotThreadMetadata {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("snapshot thread metadata must be an object");
-  }
-  const metadata = value as Record<string, unknown>;
-  assertThreadMetadata(metadata.title, metadata.url, "snapshot metadata");
-  assertDateTime(metadata.occurredAt, "snapshot metadata.occurredAt");
-  for (const field of ["deviceId", "eventId"] as const) {
-    if (typeof metadata[field] !== "string" || metadata[field].length === 0) {
-      throw new TypeError(`snapshot metadata.${field} must be a non-empty string`);
-    }
-    assertSafeComponent(metadata[field] as string, `snapshot metadata.${field}`);
-  }
-}
-
-export function assertThreadMetadata(
-  title: unknown,
-  url: unknown,
-  prefix = "thread metadata",
-): void {
-  if (typeof title !== "string" || title.length === 0) {
-    throw new TypeError(`${prefix}.title must be a non-empty string`);
-  }
-  if (typeof url !== "string" || url.length === 0) {
-    throw new TypeError(`${prefix}.url must be a non-empty string`);
-  }
-  try {
-    new URL(url);
-  } catch {
-    throw new TypeError(`${prefix}.url must be an absolute URL`);
-  }
-}
-
-function assertSnapshotViewed(value: unknown): asserts value is SnapshotViewed {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("snapshot lastViewed must be an object");
-  }
-  const viewed = value as Record<string, unknown>;
-  if (typeof viewed.occurredAt !== "string" || Number.isNaN(Date.parse(viewed.occurredAt))) {
-    throw new TypeError("snapshot lastViewed.occurredAt must be a valid date-time string");
-  }
-  for (const field of ["deviceId", "eventId"] as const) {
-    if (typeof viewed[field] !== "string" || viewed[field].length === 0) {
-      throw new TypeError(`snapshot lastViewed.${field} must be a non-empty string`);
-    }
-    assertSafeComponent(viewed[field] as string, `snapshot lastViewed.${field}`);
-  }
-  if (viewed.firstPosition !== undefined) {
-    assertPosition(viewed.firstPosition, true);
-  }
-}
-
-function assertSnapshotHistoryCleared(
-  value: unknown,
-): asserts value is SnapshotHistoryCleared {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("snapshot historyCleared must be an object");
-  }
-  const cleared = value as Record<string, unknown>;
-  if (
-    typeof cleared.occurredAt !== "string" ||
-    Number.isNaN(Date.parse(cleared.occurredAt))
-  ) {
-    throw new TypeError("snapshot historyCleared.occurredAt must be a valid date-time string");
-  }
-  for (const field of ["deviceId", "eventId"] as const) {
-    if (typeof cleared[field] !== "string" || cleared[field].length === 0) {
-      throw new TypeError(`snapshot historyCleared.${field} must be a non-empty string`);
-    }
-    assertSafeComponent(cleared[field] as string, `snapshot historyCleared.${field}`);
-  }
-}
-
-function assertSnapshotFilter(value: unknown): void {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("snapshot filter must be an object");
-  }
-  const filter = value as Record<string, unknown>;
-  assertFilterKey(filter.scope, filter.targetType, filter.target);
-  assertFilterEffect(filter.effect, "snapshot filter");
-  if (filter.isRegex !== undefined && typeof filter.isRegex !== "boolean") {
-    throw new TypeError("snapshot filter.isRegex must be a boolean");
-  }
-  assertDateTime(filter.updatedAt, "snapshot filter.updatedAt");
-  if (filter.hitAt !== undefined) {
-    assertDateTime(filter.hitAt, "snapshot filter.hitAt");
-  }
-  if (typeof filter.cleared !== "boolean") {
-    throw new TypeError("snapshot filter.cleared must be boolean");
-  }
-  for (const field of ["deviceId", "eventId"] as const) {
-    if (typeof filter[field] !== "string" || filter[field].length === 0) {
-      throw new TypeError(`snapshot filter.${field} must be a non-empty string`);
-    }
-    assertSafeComponent(filter[field] as string, `snapshot filter.${field}`);
-  }
-}
-
-export function assertFilterKey(
-  scope: unknown,
-  targetType: unknown,
-  target: unknown,
-): void {
-  if (typeof scope !== "string" || scope.length === 0) {
-    throw new TypeError("filter scope must be a non-empty string");
-  }
-  if (typeof targetType !== "string" || targetType.length === 0) {
-    throw new TypeError("filter targetType must be a non-empty string");
-  }
-  if (typeof target !== "string" || target.length === 0) {
-    throw new TypeError("filter target must be a non-empty string");
-  }
-}
-
-export function assertFilterEffect(value: unknown, name = "filter effect"): void {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${name} must be a non-empty string`);
-  }
-}
-
-export function assertDateTime(value: unknown, name: string): asserts value is string {
-  if (typeof value !== "string" || value.length === 0 || Number.isNaN(Date.parse(value))) {
-    throw new TypeError(`${name} must be a valid date-time string`);
-  }
+export function assertInteger(value: unknown, minimum: number): asserts value is number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum) throw new TypeError(`number must be a safe integer >= ${minimum}`);
 }
 
 export function assertFavoriteLevel(value: unknown): asserts value is FavoriteLevel {
-  if (value !== 1 && value !== 2 && value !== 3 && value !== 4 && value !== 5) {
-    throw new TypeError("favorite level must be an integer from 1 to 5");
+  assertInteger(value, 1);
+  if (value > 5) throw new TypeError("favorite level must be 1-5");
+}
+
+function objectWithFields(value: unknown, required: string[], optional: string[] = []): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("expected a JSON object");
+  const object = value as Record<string, unknown>;
+  if (required.some((key) => !Object.hasOwn(object, key)) ||
+    Object.keys(object).some((key) => !required.includes(key) && !optional.includes(key))) {
+    throw new TypeError(`expected fields: ${required.join(", ")}`);
   }
+  return object;
+}
+
+export function assertChange(input: unknown, withRevision = false): asserts input is StateChange {
+  const change = objectWithFields(input, withRevision ? ["key", "value", "revision"] : ["key", "value"]);
+  const { key, value } = change;
+  if (!Array.isArray(key)) throw new TypeError("key must be an array");
+  const length = key[0] === "filter" ? 4 : key[0] === "post" ? 3 : 2;
+  if (key.length !== length) throw new TypeError("invalid key length");
+  assertNonEmptyString(key[1], "threadId or scope");
+  switch (key[0]) {
+    case "metadata":
+    case "view":
+    case "count":
+    case "favorite":
+      break;
+    case "post":
+      assertInteger(key[2], 1);
+      break;
+    case "filter":
+      assertNonEmptyString(key[2], "targetType");
+      assertNonEmptyString(key[3], "target");
+      break;
+    default:
+      throw new TypeError(`unknown key kind: ${String(key[0])}`);
+  }
+  if (withRevision) assertInteger(change.revision, 1);
+  if (value === null) return;
+  switch (key[0]) {
+    case "metadata": {
+      const metadata = objectWithFields(value, ["title", "url"]);
+      assertNonEmptyString(metadata.title, "title");
+      assertNonEmptyString(metadata.url, "url");
+      try { new URL(metadata.url); } catch { throw new TypeError("url must be absolute"); }
+      break;
+    }
+    case "view": {
+      const view = objectWithFields(value, ["position", "viewedAt"], ["firstPosition"]);
+      assertInteger(view.position, 0);
+      assertDateTime(view.viewedAt);
+      if (Object.hasOwn(view, "firstPosition")) {
+        assertInteger(view.firstPosition, 0);
+        if (view.firstPosition > view.position) throw new TypeError("firstPosition must be <= position");
+      }
+      break;
+    }
+    case "count":
+      assertInteger(value, 0);
+      break;
+    case "favorite":
+      assertFavoriteLevel(value);
+      break;
+    case "post":
+      if (value !== true) throw new TypeError("post value must be true or null");
+      break;
+    case "filter": {
+      const filter = objectWithFields(value, ["effect", "isRegex", "updatedAt"], ["hitAt"]);
+      assertNonEmptyString(filter.effect, "effect");
+      if (typeof filter.isRegex !== "boolean") throw new TypeError("isRegex must be a boolean");
+      assertDateTime(filter.updatedAt);
+      if (Object.hasOwn(filter, "hitAt")) assertDateTime(filter.hitAt);
+      break;
+    }
+  }
+}
+
+export function assertDocument(input: unknown): asserts input is StateDocument {
+  const document = objectWithFields(input, ["v", "deviceId", "revision", "entries"]);
+  if (document.v !== SCHEMA_VERSION) throw new TypeError(`unsupported schema version: ${String(document.v)}`);
+  assertDeviceId(document.deviceId);
+  assertInteger(document.revision, 1);
+  if (!Array.isArray(document.entries) || document.entries.length === 0) throw new TypeError("entries must be a non-empty array");
+  const keys = new Set<string>();
+  let latest = 0;
+  for (const entry of document.entries) {
+    assertChange(entry, true);
+    const revision = (entry as StateEntry).revision;
+    latest = Math.max(latest, revision);
+    if (revision > document.revision) throw new TypeError("entry revision exceeds document revision");
+    const key = JSON.stringify(entry.key);
+    if (keys.has(key)) throw new TypeError("duplicate entry key");
+    keys.add(key);
+  }
+  if (latest !== document.revision) throw new TypeError("document revision must equal its latest entry revision");
 }

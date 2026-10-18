@@ -1,405 +1,133 @@
-import { randomUUID } from "node:crypto";
-
-import {
-  readProjectedStates,
-  readProjectedFilters,
-  readProjectionSource,
-  projectDetailedThreadStates,
-  projectFilterStates,
-  snapshotFromStates,
-  isProjectedThreadStateVisible,
-} from "./project.js";
-import type { EventStore } from "./store.js";
+import { compareStrings } from "./encoding.js";
+import { mergeDocuments, projectFilters, projectThreads } from "./project.js";
+import { entryKey, readDocuments, type StateStore } from "./store.js";
 import { synchronizeStores } from "./synchronize.js";
 import {
-  EVENT_SCHEMA_VERSION,
-  type CompactOptions,
-  type FavoriteLevel,
-  type SyncEvent,
-  type SyncEventInput,
-  type SynchronizeResult,
-  type SegmentCoverage,
-  type StateSnapshot,
-  type ThreadState,
-  type FilterEntry,
-  type FilterTargetType,
-  type FilterEffect,
+  SCHEMA_VERSION, type FavoriteLevel, type FilterEntry, type FilterValue,
+  type StateChange, type StateEntry, type SynchronizeResult, type ThreadState,
 } from "./types.js";
-import {
-  assertDateTime,
-  assertFilterKey,
-  assertFilterEffect,
-  assertPosition,
-  assertFavoriteLevel,
-  assertSafeComponent,
-  assertThreadMetadata,
-  assertThreadId,
-} from "./validation.js";
+import { assertChange, assertDeviceId, assertFavoriteLevel, assertInteger, assertNonEmptyString } from "./validation.js";
 
 export interface BbsSyncOptions {
-  readonly storage: EventStore;
+  readonly storage: StateStore;
   readonly deviceId: string;
+  /** Used only for display timestamps, never conflict resolution. */
   readonly clock?: () => Date;
-  readonly idGenerator?: () => string;
 }
 
 export class BbsSync {
-  readonly storage: EventStore;
+  readonly storage: StateStore;
   readonly deviceId: string;
   private readonly clock: () => Date;
-  private readonly idGenerator: () => string;
+  private updateQueue: Promise<void> = Promise.resolve();
 
   constructor(options: BbsSyncOptions) {
-    assertSafeComponent(options.deviceId, "deviceId");
+    assertDeviceId(options.deviceId);
     this.storage = options.storage;
     this.deviceId = options.deviceId;
     this.clock = options.clock ?? (() => new Date());
-    this.idGenerator = options.idGenerator ?? randomUUID;
   }
 
-  async append(inputs: readonly SyncEventInput[]): Promise<readonly SyncEvent[]> {
-    if (inputs.length === 0) return [];
-
-    const events = inputs.map((input) => this.createEvent(input));
-    await this.storage.appendEvents(this.deviceId, events);
-    return events;
+  /** Apply distinct keys together, with one logical revision and one file write. */
+  async update(changes: readonly StateChange[]): Promise<void> {
+    const keys = new Set<string>();
+    for (const change of changes) {
+      assertChange(change);
+      const key = entryKey(change.key);
+      if (keys.has(key)) throw new TypeError("duplicate change key");
+      keys.add(key);
+    }
+    if (changes.length === 0) return;
+    const copy = structuredClone(changes);
+    const operation = this.updateQueue.then(async () => {
+      const documents = await readDocuments(this.storage);
+      let maximum = 0;
+      for (const document of documents) maximum = Math.max(maximum, document.revision);
+      if (maximum === Number.MAX_SAFE_INTEGER) throw new RangeError("logical revision exhausted; update cannot be saved");
+      const revision = maximum + 1;
+      const previous = documents.find((document) => document.deviceId === this.deviceId);
+      const entries = new Map<string, StateEntry>(previous?.entries.map((entry) => [entryKey(entry.key), entry]));
+      for (const change of copy) entries.set(entryKey(change.key), { ...change, revision });
+      await this.storage.writeDocument({
+        v: SCHEMA_VERSION,
+        deviceId: this.deviceId,
+        revision,
+        entries: [...entries.values()].sort((a, b) => compareStrings(entryKey(a.key), entryKey(b.key))),
+      });
+    });
+    this.updateQueue = operation.catch(() => undefined);
+    return operation;
   }
 
-  async recordThreadView(
-    threadId: string,
-    position: number,
-    firstPosition?: number,
-  ): Promise<SyncEvent> {
-    const [event] = await this.append([
-      {
-        type: "thread.viewed",
-        threadId,
-        position,
-        ...(firstPosition === undefined
-          ? {}
-          : { firstPosition }),
-      },
-    ]);
-    return event!;
+  async setThreadMetadata(threadId: string, title: string, url: string): Promise<void> {
+    return this.update([{ key: ["metadata", threadId], value: { title, url } }]);
   }
 
-  async clearThreadHistory(threadId: string): Promise<SyncEvent> {
-    const [event] = await this.append([
-      { type: "thread.history.cleared", threadId },
-    ]);
-    return event!;
-  }
-
-  async setThreadMetadata(
-    threadId: string,
-    title: string,
-    url: string,
-  ): Promise<SyncEvent> {
-    const [event] = await this.append([
-      { type: "thread.metadata.updated", threadId, title, url },
-    ]);
-    return event!;
-  }
-
-  async setFavorite(
-    threadId: string,
-    level: FavoriteLevel = 1,
-  ): Promise<SyncEvent> {
-    const [event] = await this.append([
-      { type: "thread.favorite.set", threadId, level },
-    ]);
-    return event!;
-  }
-
-  async clearFavorite(threadId: string): Promise<SyncEvent> {
-    const [event] = await this.append([
-      { type: "thread.favorite.cleared", threadId },
-    ]);
-    return event!;
-  }
-
-  async recordPost(threadId: string, position: number): Promise<SyncEvent> {
-    const [event] = await this.append([
-      { type: "thread.post.recorded", threadId, position },
-    ]);
-    return event!;
-  }
-
-  async clearPost(threadId: string, position: number): Promise<SyncEvent> {
-    const [event] = await this.append([
-      { type: "thread.post.cleared", threadId, position },
-    ]);
-    return event!;
-  }
-
-  async recordResponseCount(threadId: string, responseCount: number): Promise<SyncEvent> {
-    const [event] = await this.append([
-      { type: "thread.response-count.observed", threadId, responseCount },
-    ]);
-    return event!;
-  }
-
-  async addFilter(
-    scope: string,
-    targetType: FilterTargetType,
-    target: string,
-    effect: FilterEffect,
-    options: {
-      readonly updatedAt?: string;
-      readonly hitAt?: string | null;
-      readonly isRegex?: boolean;
-    } = {},
-  ): Promise<SyncEvent> {
-    const [event] = await this.append([{
-      type: "filter.set",
-      scope,
-      targetType,
-      target,
-      effect,
-      ...(options.isRegex === undefined ? {} : { isRegex: options.isRegex }),
-      ...(options.updatedAt === undefined ? {} : { updatedAt: options.updatedAt }),
-      ...(options.hitAt === undefined ? {} : { hitAt: options.hitAt }),
+  async recordThreadView(threadId: string, position: number, firstPosition?: number): Promise<void> {
+    return this.update([{
+      key: ["view", threadId],
+      value: { position, ...(firstPosition === undefined ? {} : { firstPosition }), viewedAt: this.clock().toISOString() },
     }]);
-    return event!;
+  }
+
+  async recordResponseCount(threadId: string, responseCount: number): Promise<void> {
+    assertInteger(responseCount, 0);
+    return this.update([{ key: ["count", threadId], value: responseCount }]);
+  }
+
+  async clearThreadHistory(threadId: string): Promise<void> {
+    return this.update([{ key: ["view", threadId], value: null }, { key: ["count", threadId], value: null }]);
+  }
+
+  async setFavorite(threadId: string, level: FavoriteLevel = 1): Promise<void> {
+    assertFavoriteLevel(level);
+    return this.update([{ key: ["favorite", threadId], value: level }]);
+  }
+
+  async clearFavorite(threadId: string): Promise<void> {
+    return this.update([{ key: ["favorite", threadId], value: null }]);
+  }
+
+  async recordPost(threadId: string, position: number): Promise<void> {
+    return this.update([{ key: ["post", threadId, position], value: true }]);
+  }
+
+  async clearPost(threadId: string, position: number): Promise<void> {
+    return this.update([{ key: ["post", threadId, position], value: null }]);
   }
 
   async setFilter(
-    scope: string,
-    targetType: FilterTargetType,
-    target: string,
-    effect: FilterEffect,
-    options: {
-      readonly updatedAt?: string;
-      readonly hitAt?: string | null;
-      readonly isRegex?: boolean;
-    } = {},
-  ): Promise<SyncEvent> {
-    return this.addFilter(scope, targetType, target, effect, options);
+    scope: string, targetType: string, target: string, effect: string,
+    options: { readonly isRegex?: boolean; readonly updatedAt?: string; readonly hitAt?: string } = {},
+  ): Promise<void> {
+    const value: FilterValue = {
+      effect, isRegex: options.isRegex === undefined ? false : options.isRegex,
+      updatedAt: options.updatedAt === undefined ? this.clock().toISOString() : options.updatedAt,
+      ...(options.hitAt === undefined ? {} : { hitAt: options.hitAt }),
+    };
+    return this.update([{ key: ["filter", scope, targetType, target], value }]);
   }
 
-  async removeFilter(
-    scope: string,
-    targetType: FilterTargetType,
-    target: string,
-    options: { readonly updatedAt?: string } = {},
-  ): Promise<SyncEvent> {
-    const [event] = await this.append([{
-      type: "filter.cleared",
-      scope,
-      targetType,
-      target,
-      ...(options.updatedAt === undefined ? {} : { updatedAt: options.updatedAt }),
-    }]);
-    return event!;
-  }
-
-  async clearFilter(
-    scope: string,
-    targetType: FilterTargetType,
-    target: string,
-    options: { readonly updatedAt?: string } = {},
-  ): Promise<SyncEvent> {
-    return this.removeFilter(scope, targetType, target, options);
-  }
-
-  async getFilters(scope?: string): Promise<readonly FilterEntry[]> {
-    const projected = await readProjectedFilters(this.storage);
-    return [...projected.values()]
-      .filter((filter) => !filter.cleared && (scope === undefined || filter.scope === scope))
-      .map((filter) => ({
-        scope: filter.scope,
-        targetType: filter.targetType,
-        target: filter.target,
-        effect: filter.effect,
-        isRegex: filter.isRegex,
-        updatedAt: filter.updatedAt,
-        ...(filter.hitAt === undefined ? {} : { hitAt: filter.hitAt }),
-      }));
+  async clearFilter(scope: string, targetType: string, target: string): Promise<void> {
+    return this.update([{ key: ["filter", scope, targetType, target], value: null }]);
   }
 
   async getStates(): Promise<ReadonlyMap<string, ThreadState>> {
-    const projected = await readProjectedStates(this.storage);
-    return new Map(
-      [...projected.entries()]
-        .filter(([, state]) => isProjectedThreadStateVisible(state))
-        .map(([threadId, state]) => [
-          threadId,
-          {
-            threadId: state.threadId,
-            ...(state.metadata === undefined
-              ? {}
-              : { title: state.metadata.title, url: state.metadata.url }),
-            ...(state.lastReadPosition === undefined
-              ? {}
-              : { lastReadPosition: state.lastReadPosition }),
-            ...(state.firstReadPosition === undefined
-              ? {}
-              : { firstReadPosition: state.firstReadPosition }),
-            ...(state.responseCount === undefined
-              ? {}
-              : { responseCount: state.responseCount }),
-            ...(state.lastViewed === undefined
-              ? {}
-              : { lastViewedAt: state.lastViewed.occurredAt }),
-            ...(state.favoriteLevel === undefined
-              ? {}
-              : { favoriteLevel: state.favoriteLevel }),
-            postPositions: state.postPositions,
-          },
-        ]),
-    );
+    return projectThreads(mergeDocuments(await readDocuments(this.storage)));
   }
 
   async getThreadState(threadId: string): Promise<ThreadState | undefined> {
-    assertThreadId(threadId);
+    assertNonEmptyString(threadId, "threadId");
     return (await this.getStates()).get(threadId);
   }
 
-  async synchronizeWith(remote: EventStore): Promise<SynchronizeResult> {
+  async getFilters(scope?: string): Promise<readonly FilterEntry[]> {
+    if (scope !== undefined) assertNonEmptyString(scope, "scope");
+    return projectFilters(mergeDocuments(await readDocuments(this.storage)), scope);
+  }
+
+  async synchronizeWith(remote: StateStore): Promise<SynchronizeResult> {
+    await this.updateQueue;
     return synchronizeStores(this.storage, remote);
-  }
-
-  async compact(options?: CompactOptions): Promise<StateSnapshot> {
-    const source = await readProjectionSource(this.storage);
-    const states = projectDetailedThreadStates(
-      source.events,
-      source.snapshots.flatMap((snapshot) => snapshot.threads),
-    );
-    const filters = projectFilterStates(
-      source.events,
-      source.snapshots.flatMap((snapshot) => snapshot.filters),
-    );
-    const previous = await this.storage.readSnapshot(this.deviceId);
-    const coveredSegments: SegmentCoverage[] = source.segments
-      .filter(({ ref }) => ref.deviceId === this.deviceId)
-      .map(({ ref, events }) => ({
-        segmentId: ref.segmentId,
-        eventCount: events.length,
-      }));
-    const snapshot = snapshotFromStates(
-      this.deviceId,
-      (previous?.revision ?? 0) + 1,
-      this.clock().toISOString(),
-      coveredSegments,
-      states,
-      filters,
-      options,
-    );
-    await this.storage.writeSnapshot(snapshot);
-    await this.storage.pruneSegments(snapshot);
-    return snapshot;
-  }
-
-  private createEvent(input: SyncEventInput): SyncEvent {
-    const id = this.idGenerator();
-    assertSafeComponent(id, "event.id");
-    const occurredAt = input.occurredAt ?? this.clock().toISOString();
-    if (Number.isNaN(Date.parse(occurredAt))) {
-      throw new TypeError("occurredAt must be a valid date-time string");
-    }
-
-    const base = {
-      v: EVENT_SCHEMA_VERSION,
-      id,
-      deviceId: this.deviceId,
-      occurredAt,
-    };
-
-    switch (input.type) {
-      case "filter.set": {
-        assertFilterKey(input.scope, input.targetType, input.target);
-        assertFilterEffect(input.effect);
-        if (input.isRegex !== undefined && typeof input.isRegex !== "boolean") {
-          throw new TypeError("filter isRegex must be a boolean");
-        }
-        const updatedAt = input.updatedAt ?? occurredAt;
-        assertDateTime(updatedAt, "updatedAt");
-        if (input.hitAt !== undefined && input.hitAt !== null) {
-          assertDateTime(input.hitAt, "hitAt");
-        }
-        return {
-          ...base,
-          type: input.type,
-          scope: input.scope,
-          targetType: input.targetType,
-          target: input.target,
-          effect: input.effect,
-          isRegex: input.isRegex ?? false,
-          updatedAt,
-          ...(input.hitAt === undefined ? {} : { hitAt: input.hitAt }),
-        };
-      }
-      case "filter.cleared": {
-        assertFilterKey(input.scope, input.targetType, input.target);
-        const updatedAt = input.updatedAt ?? occurredAt;
-        assertDateTime(updatedAt, "updatedAt");
-        return {
-          ...base,
-          type: input.type,
-          scope: input.scope,
-          targetType: input.targetType,
-          target: input.target,
-          updatedAt,
-        };
-      }
-      default:
-        assertThreadId(input.threadId);
-        return this.createThreadEvent(base, input);
-    }
-  }
-
-  private createThreadEvent(
-    base: {
-      readonly v: typeof EVENT_SCHEMA_VERSION;
-      readonly id: string;
-      readonly deviceId: string;
-      readonly occurredAt: string;
-    },
-    input: Exclude<SyncEventInput, { type: "filter.set" | "filter.cleared" }>,
-  ): SyncEvent {
-    const threadBase = { ...base, threadId: input.threadId };
-    switch (input.type) {
-      case "thread.metadata.updated":
-        assertThreadMetadata(input.title, input.url);
-        return {
-          ...threadBase,
-          type: input.type,
-          title: input.title,
-          url: input.url,
-        };
-      case "thread.viewed":
-        assertPosition(input.position, true);
-        if (input.firstPosition !== undefined) {
-          assertPosition(input.firstPosition, true);
-          if (input.firstPosition > input.position) {
-            throw new TypeError("firstPosition must be less than or equal to position");
-          }
-        }
-        return {
-          ...threadBase,
-          type: input.type,
-          position: input.position,
-          ...(input.firstPosition === undefined
-            ? {}
-            : { firstPosition: input.firstPosition }),
-        };
-      case "thread.history.cleared":
-        return { ...threadBase, type: input.type };
-      case "thread.response-count.observed":
-        assertPosition(input.responseCount, true);
-        return { ...threadBase, type: input.type, responseCount: input.responseCount };
-      case "thread.favorite.set":
-        const level = input.level ?? 1;
-        assertFavoriteLevel(level);
-        return { ...threadBase, type: input.type, level };
-      case "thread.favorite.cleared":
-        return { ...threadBase, type: input.type };
-      case "thread.post.recorded":
-        assertPosition(input.position, false);
-        return { ...threadBase, type: input.type, position: input.position };
-      case "thread.post.cleared":
-        assertPosition(input.position, false);
-        return { ...threadBase, type: input.type, position: input.position };
-    }
   }
 }

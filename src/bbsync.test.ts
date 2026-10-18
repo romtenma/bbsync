@@ -4,1147 +4,219 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { BbsSync } from "./bbsync.js";
 import {
-  BbsyncError,
-  CoverageMismatchError,
-  EventCollisionError,
-  SegmentDivergenceError,
-  SnapshotCollisionError,
-} from "./errors.js";
-import { LocalEventStore } from "./local-event-store.js";
-import {
-  projectDetailedThreadStates,
-  projectFilterStates,
-  readAllEvents,
-} from "./project.js";
-import type { SnapshotThreadState, SyncEvent } from "./types.js";
-
-test("projects bulletin-board state from JSONL events", async () => {
-  const fixture = await createFixture();
-  try {
-    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await sync.append([
-      { type: "thread.viewed", threadId: "example/thread-1", position: 10 },
-      { type: "thread.viewed", threadId: "example/thread-1", position: 8 },
-      {
-        type: "thread.response-count.observed",
-        threadId: "example/thread-1",
-        responseCount: 15,
-      },
-      {
-        type: "thread.response-count.observed",
-        threadId: "example/thread-1",
-        responseCount: 14,
-      },
-      { type: "thread.favorite.set", threadId: "example/thread-1", level: 3 },
-      { type: "thread.post.recorded", threadId: "example/thread-1", position: 11 },
-      { type: "thread.post.recorded", threadId: "example/thread-1", position: 11 },
-    ]);
-
-    assert.deepEqual(await sync.getThreadState("example/thread-1"), {
-      threadId: "example/thread-1",
-      lastReadPosition: 10,
-      responseCount: 15,
-      lastViewedAt: "2026-09-20T00:00:00.000Z",
-      favoriteLevel: 3,
-      postPositions: [11],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("records an optional first viewport position alongside the last position", async () => {
-  const fixture = await createFixture();
-  try {
-    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const event = await sync.recordThreadView("thread-1", 20, 12);
-
-    assert.deepEqual(event, {
-      v: 2,
-      id: "id-desktop-1",
-      deviceId: "desktop",
-      occurredAt: "2026-09-20T00:00:00.000Z",
-      threadId: "thread-1",
-      type: "thread.viewed",
-      position: 20,
-      firstPosition: 12,
-    });
-    assert.deepEqual(await sync.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      lastReadPosition: 20,
-      firstReadPosition: 12,
-      lastViewedAt: "2026-09-20T00:00:00.000Z",
-      postPositions: [],
-    });
-
-    const snapshot = await sync.compact();
-    assert.deepEqual(snapshot.threads[0], {
-      threadId: "thread-1",
-      lastReadPosition: 20,
-      firstReadPosition: 12,
-      lastViewed: {
-        occurredAt: "2026-09-20T00:00:00.000Z",
-        deviceId: "desktop",
-        eventId: "id-desktop-1",
-        firstPosition: 12,
-      },
-      postPositions: [],
-    });
-    assert.deepEqual(
-      await new BbsSync({
-        storage: fixture.left,
-        deviceId: "mobile",
-      }).getThreadState("thread-1"),
-      {
-        threadId: "thread-1",
-        lastReadPosition: 20,
-        firstReadPosition: 12,
-        lastViewedAt: "2026-09-20T00:00:00.000Z",
-        postPositions: [],
-      },
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("rejects a first viewport position after the last position", async () => {
-  const fixture = await createFixture();
-  try {
-    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await assert.rejects(
-      () => sync.recordThreadView("thread-1", 10, 11),
-      /firstPosition must be less than or equal to position/,
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("clears a post position and keeps the deletion marker through sync and compaction", async () => {
-  const fixture = await createFixture(1, 0);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
-
-    await desktop.recordPost("thread-1", 11);
-    const cleared = await desktop.clearPost("thread-1", 11);
-    assert.equal(cleared.type, "thread.post.cleared");
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      postPositions: [],
-    });
-
-    const snapshot = await desktop.compact();
-    assert.deepEqual(snapshot.threads[0]?.postCleared, [{
-      position: 11,
-      occurredAt: "2026-09-20T00:00:00.000Z",
-      deviceId: "desktop",
-      eventId: "id-desktop-2",
-    }]);
-
-    await mobile.append([{
-      type: "thread.post.recorded",
-      threadId: "thread-1",
-      position: 11,
-      occurredAt: "2026-09-19T23:59:00.000Z",
-    }]);
-    await desktop.synchronizeWith(mobile.storage);
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      postPositions: [],
-    });
-
-    await desktop.append([{
-      type: "thread.post.recorded",
-      threadId: "thread-1",
-      position: 11,
-      occurredAt: "2026-09-20T00:01:00.000Z",
-    }]);
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      postPositions: [11],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("does not cover an event appended after compact captured its state", async () => {
-  const fixture = await createFixture(10, 0);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await desktop.recordThreadView("thread-1", 1);
-
-    // Keep snapshot discovery side-effect free so readSnapshot marks the exact
-    // point between projection capture and snapshot creation.
-    fixture.left.listSnapshots = async () => [];
-    const readSnapshot = fixture.left.readSnapshot.bind(fixture.left);
-    let appended = false;
-    fixture.left.readSnapshot = async (deviceId) => {
-      if (!appended) {
-        appended = true;
-        await desktop.append([{
-          type: "thread.post.recorded",
-          threadId: "thread-2",
-          position: 7,
-          occurredAt: "2026-09-20T00:01:00.000Z",
-        }]);
-      }
-      return readSnapshot(deviceId);
-    };
-
-    const snapshot = await desktop.compact();
-    assert.equal(snapshot.coveredSegments[0]?.eventCount, 1);
-    assert.equal((await fixture.left.listSegments()).length, 1);
-    assert.deepEqual(await desktop.getThreadState("thread-2"), {
-      threadId: "thread-2",
-      postPositions: [7],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("preserves active post ordering metadata through compaction", async () => {
-  const fixture = await createFixture(1, 0);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
-    await desktop.append([{
-      type: "thread.post.recorded",
-      threadId: "thread-1",
-      position: 7,
-      occurredAt: "2026-09-20T00:02:00.000Z",
-    }]);
-
-    const snapshot = await desktop.compact();
-    assert.deepEqual(snapshot.threads[0]?.postRecords, [{
-      position: 7,
-      occurredAt: "2026-09-20T00:02:00.000Z",
-      deviceId: "desktop",
-      eventId: "id-desktop-1",
-    }]);
-    assert.deepEqual(await fixture.left.listSegments(), []);
-
-    await mobile.append([{
-      type: "thread.post.cleared",
-      threadId: "thread-1",
-      position: 7,
-      occurredAt: "2026-09-20T00:01:00.000Z",
-    }]);
-    await desktop.synchronizeWith(fixture.right);
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      postPositions: [7],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("merges legacy post positions and deletion markers independently of snapshot order", () => {
-  const active: SnapshotThreadState = {
-    threadId: "thread-1",
-    postPositions: [7],
-  };
-  const deleted: SnapshotThreadState = {
-    threadId: "thread-1",
-    postPositions: [],
-    postCleared: [{
-      position: 7,
-      occurredAt: "2026-09-20T00:01:00.000Z",
-      deviceId: "desktop",
-      eventId: "delete-1",
-    }],
-  };
-
-  for (const seeds of [[active, deleted], [deleted, active]]) {
-    assert.deepEqual(
-      projectDetailedThreadStates([], seeds).get("thread-1")?.postPositions,
-      [],
-    );
-  }
-});
-
-test("clears synchronized thread history without removing favorites or posts", async () => {
-  const fixture = await createFixture();
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
-
-    await desktop.append([
-      {
-        type: "thread.viewed",
-        threadId: "thread-1",
-        position: 20,
-        occurredAt: "2026-09-20T00:00:00.000Z",
-      },
-      { type: "thread.favorite.set", threadId: "thread-1", level: 3 },
-      { type: "thread.post.recorded", threadId: "thread-1", position: 21 },
-      {
-        type: "thread.history.cleared",
-        threadId: "thread-1",
-        occurredAt: "2026-09-20T00:01:00.000Z",
-      },
-    ]);
-
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      favoriteLevel: 3,
-      postPositions: [21],
-    });
-
-    await desktop.synchronizeWith(mobile.storage);
-    assert.deepEqual(await mobile.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      favoriteLevel: 3,
-      postPositions: [21],
-    });
-
-    await mobile.append([{
-      type: "thread.viewed",
-      threadId: "thread-1",
-      position: 19,
-      occurredAt: "2026-09-20T00:00:30.000Z",
-    }]);
-    await desktop.synchronizeWith(mobile.storage);
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      favoriteLevel: 3,
-      postPositions: [21],
-    });
-
-    await mobile.append([{
-      type: "thread.viewed",
-      threadId: "thread-1",
-      position: 4,
-      occurredAt: "2026-09-20T00:02:00.000Z",
-    }]);
-    await desktop.synchronizeWith(mobile.storage);
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      lastReadPosition: 4,
-      lastViewedAt: "2026-09-20T00:02:00.000Z",
-      favoriteLevel: 3,
-      postPositions: [21],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("keeps an offline view that occurred after another device cleared history", async () => {
-  const fixture = await createFixture(1, 0);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
-    await desktop.append([{
-      type: "thread.history.cleared",
-      threadId: "thread-1",
-      occurredAt: "2026-09-20T00:01:00.000Z",
-    }]);
-    await mobile.append([{
-      type: "thread.viewed",
-      threadId: "thread-1",
-      position: 8,
-      firstPosition: 6,
-      occurredAt: "2026-09-20T00:02:00.000Z",
-    }]);
-    await desktop.compact();
-    await mobile.compact();
-
-    await desktop.synchronizeWith(mobile.storage);
-    const expected = {
-      threadId: "thread-1",
-      lastReadPosition: 8,
-      firstReadPosition: 6,
-      lastViewedAt: "2026-09-20T00:02:00.000Z",
-      postPositions: [],
-    };
-    assert.deepEqual(await desktop.getThreadState("thread-1"), expected);
-    assert.deepEqual(await mobile.getThreadState("thread-1"), expected);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("keeps a history deletion marker through compaction", async () => {
-  const fixture = await createFixture(1, 0);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
-    await desktop.append([
-      {
-        type: "thread.viewed",
-        threadId: "thread-1",
-        position: 12,
-        occurredAt: "2026-09-20T00:00:00.000Z",
-      },
-      {
-        type: "thread.history.cleared",
-        threadId: "thread-1",
-        occurredAt: "2026-09-20T00:01:00.000Z",
-      },
-    ]);
-
-    const snapshot = await desktop.compact();
-    assert.deepEqual(snapshot.threads[0]?.historyCleared, {
-      occurredAt: "2026-09-20T00:01:00.000Z",
-      deviceId: "desktop",
-      eventId: "id-desktop-2",
-    });
-    assert.equal(await desktop.getThreadState("thread-1"), undefined);
-
-    await desktop.synchronizeWith(mobile.storage);
-    assert.equal(await mobile.getThreadState("thread-1"), undefined);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("syncs thread title and URL without changing the thread key", async () => {
-  const fixture = await createFixture();
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:01:00Z");
-
-    const event = await desktop.setThreadMetadata(
-      "egg.5ch.net/software/1234567890",
-      "最初のタイトル",
-      "https://egg.5ch.net/test/read.cgi/software/1234567890/",
-    );
-    assert.equal(event.v, 2);
-    assert.equal(event.type, "thread.metadata.updated");
-    assert.equal(event.threadId, "egg.5ch.net/software/1234567890");
-
-    await desktop.synchronizeWith(mobile.storage);
-    assert.deepEqual(
-      await mobile.getThreadState("egg.5ch.net/software/1234567890"),
-      {
-        threadId: "egg.5ch.net/software/1234567890",
-        title: "最初のタイトル",
-        url: "https://egg.5ch.net/test/read.cgi/software/1234567890/",
-        postPositions: [],
-      },
-    );
-
-    await mobile.setThreadMetadata(
-      "egg.5ch.net/software/1234567890",
-      "更新後のタイトル",
-      "https://egg.5ch.net/test/read.cgi/software/1234567890/",
-    );
-    await desktop.synchronizeWith(mobile.storage);
-
-    const expected = {
-      threadId: "egg.5ch.net/software/1234567890",
-      title: "更新後のタイトル",
-      url: "https://egg.5ch.net/test/read.cgi/software/1234567890/",
-      postPositions: [],
-    };
-    assert.deepEqual(await desktop.getThreadState("egg.5ch.net/software/1234567890"), expected);
-    assert.deepEqual(await mobile.getThreadState("egg.5ch.net/software/1234567890"), expected);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("preserves thread metadata conflict information through compaction", async () => {
-  const fixture = await createFixture(1, 0);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:01:00Z");
-    const offline = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
-    await desktop.setThreadMetadata(
-      "thread-1",
-      "新しいタイトル",
-      "https://example.com/thread/1",
-    );
-    const snapshot = await desktop.compact();
-    assert.deepEqual(snapshot.threads[0]?.metadata, {
-      title: "新しいタイトル",
-      url: "https://example.com/thread/1",
-      occurredAt: "2026-09-20T00:01:00.000Z",
-      deviceId: "desktop",
-      eventId: "id-desktop-1",
-    });
-
-    await offline.setThreadMetadata(
-      "thread-1",
-      "古いタイトル",
-      "https://example.net/old-thread/1",
-    );
-    await desktop.synchronizeWith(offline.storage);
-
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      title: "新しいタイトル",
-      url: "https://example.com/thread/1",
-      postPositions: [],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("merges thread metadata independently of a history deletion snapshot", async () => {
-  const fixture = await createFixture(1, 0);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const offline = createSync(fixture.right, "mobile", "2026-09-20T00:00:00Z");
-    await desktop.append([{
-      type: "thread.history.cleared",
-      threadId: "thread-1",
-      occurredAt: "2026-09-20T00:01:00.000Z",
-    }, {
-      type: "thread.favorite.set",
-      threadId: "thread-1",
-      level: 1,
-      occurredAt: "2026-09-20T00:01:00.000Z",
-    }]);
-    await desktop.compact();
-    await offline.append([{
-      type: "thread.metadata.updated",
-      threadId: "thread-1",
-      title: "オフラインで取得したタイトル",
-      url: "https://example.com/thread/1",
-      occurredAt: "2026-09-20T00:00:00.000Z",
-    }]);
-
-    await desktop.synchronizeWith(offline.storage);
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      title: "オフラインで取得したタイトル",
-      url: "https://example.com/thread/1",
-      favoriteLevel: 1,
-      postPositions: [],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("validates thread metadata", async () => {
-  const fixture = await createFixture();
-  try {
-    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await assert.rejects(
-      () => sync.setThreadMetadata("thread-1", "", "https://example.com/thread/1"),
-      /title must be a non-empty string/,
-    );
-    await assert.rejects(
-      () => sync.setThreadMetadata("thread-1", "タイトル", "/thread/1"),
-      /url must be an absolute URL/,
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("defaults an omitted favorite level to one", async () => {
-  const fixture = await createFixture();
-  try {
-    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const event = await sync.setFavorite("thread-1");
-    assert.equal(event.type, "thread.favorite.set");
-    assert.equal(event.level, 1);
-    assert.deepEqual(await sync.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      favoriteLevel: 1,
-      postPositions: [],
-    });
-    await assert.rejects(() => sync.setFavorite("thread-1", 0 as never), /1 to 5/);
-    await assert.rejects(() => sync.setFavorite("thread-1", 6 as never), /1 to 5/);
-    const cleared = await sync.clearFavorite("thread-1");
-    assert.equal(cleared.type, "thread.favorite.cleared");
-    assert.deepEqual(await sync.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      postPositions: [],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("synchronizes rotated segments in both directions", async () => {
-  const fixture = await createFixture();
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const mobile = createSync(fixture.right, "mobile", "2026-09-20T00:01:00Z");
-
-    await desktop.recordThreadView("example/thread-1", 20);
-    await desktop.setFavorite("example/thread-1", 3);
-    await mobile.recordThreadView("example/thread-1", 25);
-    await mobile.setFavorite("example/thread-1", 2);
-    await mobile.recordPost("example/thread-1", 26);
-
-    assert.deepEqual(await desktop.synchronizeWith(mobile.storage), {
-      copiedToLeft: 1,
-      copiedToRight: 1,
-      copiedSnapshotsToLeft: 0,
-      copiedSnapshotsToRight: 0,
-    });
-    assert.deepEqual(await desktop.synchronizeWith(mobile.storage), {
-      copiedToLeft: 0,
-      copiedToRight: 0,
-      copiedSnapshotsToLeft: 0,
-      copiedSnapshotsToRight: 0,
-    });
-
-    const expected = {
-      threadId: "example/thread-1",
-      lastReadPosition: 25,
-      lastViewedAt: "2026-09-20T00:01:00.000Z",
-      favoriteLevel: 2,
-      postPositions: [26],
-    };
-    assert.deepEqual(await desktop.getThreadState("example/thread-1"), expected);
-    assert.deepEqual(await mobile.getThreadState("example/thread-1"), expected);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("rotates segments at the configured event count", async () => {
-  const fixture = await createFixture(2);
-  try {
-    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await sync.append([
-      { type: "thread.viewed", threadId: "thread-1", position: 1 },
-      { type: "thread.viewed", threadId: "thread-1", position: 2 },
-      { type: "thread.viewed", threadId: "thread-1", position: 3 },
-      { type: "thread.post.recorded", threadId: "thread-1", position: 4 },
-      { type: "thread.favorite.set", threadId: "thread-1", level: 4 },
-    ]);
-
-    const refs = await fixture.left.listSegments();
-    assert.equal(refs.length, 3);
-    assert.deepEqual(
-      await Promise.all(refs.map(async (ref) => (await fixture.left.readSegment(ref)).length)),
-      [2, 2, 1],
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("synchronizes an active segment again when it has grown", async () => {
-  const fixture = await createFixture(3);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await desktop.recordThreadView("thread-1", 1);
-    assert.deepEqual(await desktop.synchronizeWith(fixture.right), {
-      copiedToLeft: 0,
-      copiedToRight: 1,
-      copiedSnapshotsToLeft: 0,
-      copiedSnapshotsToRight: 0,
-    });
-
-    await desktop.recordThreadView("thread-1", 2);
-    assert.deepEqual(await desktop.synchronizeWith(fixture.right), {
-      copiedToLeft: 0,
-      copiedToRight: 1,
-      copiedSnapshotsToLeft: 0,
-      copiedSnapshotsToRight: 0,
-    });
-    assert.equal(
-      (await fixture.right.readSegment((await fixture.right.listSegments())[0]!)).length,
-      2,
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("compacts old events into a per-device snapshot", async () => {
-  const fixture = await createFixture(2, 1);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await desktop.append([
-      { type: "thread.viewed", threadId: "thread-1", position: 1 },
-      { type: "thread.viewed", threadId: "thread-1", position: 2 },
-      { type: "thread.viewed", threadId: "thread-1", position: 3 },
-      { type: "thread.favorite.set", threadId: "thread-1", level: 4 },
-      { type: "thread.post.recorded", threadId: "thread-1", position: 4 },
-    ]);
-
-    const snapshot = await desktop.compact();
-    assert.equal(snapshot.revision, 1);
-    assert.equal((await fixture.left.listSegments()).length, 1);
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      lastReadPosition: 3,
-      lastViewedAt: "2026-09-20T00:00:00.000Z",
-      favoriteLevel: 4,
-      postPositions: [4],
-    });
-
-    assert.deepEqual(await desktop.synchronizeWith(fixture.right), {
-      copiedToLeft: 0,
-      copiedToRight: 1,
-      copiedSnapshotsToLeft: 0,
-      copiedSnapshotsToRight: 1,
-    });
-    assert.deepEqual(await new BbsSync({
-      storage: fixture.right,
-      deviceId: "mobile",
-    }).getThreadState("thread-1"), {
-      threadId: "thread-1",
-      lastReadPosition: 3,
-      lastViewedAt: "2026-09-20T00:00:00.000Z",
-      favoriteLevel: 4,
-      postPositions: [4],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("keeps events added after the snapshot coverage", async () => {
-  const fixture = await createFixture(1, 0);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await desktop.recordThreadView("thread-1", 1);
-    await desktop.compact();
-    assert.equal((await fixture.left.listSegments()).length, 0);
-
-    await desktop.recordThreadView("thread-1", 2);
-    await desktop.synchronizeWith(fixture.right);
-
-    assert.deepEqual(await new BbsSync({
-      storage: fixture.right,
-      deviceId: "mobile",
-    }).getThreadState("thread-1"), {
-      threadId: "thread-1",
-      lastReadPosition: 2,
-      lastViewedAt: "2026-09-20T00:00:00.000Z",
-      postPositions: [],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("keeps a cleared favorite over an older offline level", async () => {
-  const fixture = await createFixture(2, 0);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const offline = createSync(fixture.right, "mobile", "2026-09-19T00:00:00Z");
-    await desktop.setFavorite("thread-1", 4);
-    await desktop.clearFavorite("thread-1");
-    const snapshot = await desktop.compact();
-    assert.equal(snapshot.threads[0]?.favorite?.cleared, true);
-    assert.deepEqual(await fixture.left.listSegments(), []);
-    await offline.setFavorite("thread-1", 5);
-
-    await desktop.synchronizeWith(offline.storage);
-    assert.deepEqual(await desktop.getThreadState("thread-1"), {
-      threadId: "thread-1",
-      postPositions: [],
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("synchronizes filter targets, effects, timestamps, and scopes", async () => {
-  const fixture = await createFixture();
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const normalEvent = await desktop.addFilter("egg.5ch.net/software", "TEXT", "NGワード", "NOP", {
-      updatedAt: "2026-09-20T00:01:00.000Z",
-      hitAt: "2026-09-20T00:00:30.000Z",
-    });
-    assert.equal(normalEvent.type, "filter.set");
-    if (normalEvent.type !== "filter.set") throw new Error("expected filter.set");
-    assert.equal(normalEvent.isRegex, false);
-    const regexEvent = await desktop.setFilter("egg.5ch.net/software", "ID", "ABCDEFG", "HIDE", {
-      updatedAt: "2026-09-20T00:02:00.000Z",
-      isRegex: true,
-    });
-    assert.equal(regexEvent.type, "filter.set");
-    if (regexEvent.type !== "filter.set") throw new Error("expected filter.set");
-    assert.equal(regexEvent.isRegex, true);
-    await desktop.addFilter("egg.5ch.net/news", "ID", "ABCDEFG", "HIGHLIGHT", {
-      updatedAt: "2026-09-20T00:03:00.000Z",
-    });
-
-    assert.deepEqual(await desktop.getFilters("egg.5ch.net/software"), [
-      {
-        scope: "egg.5ch.net/software",
-        targetType: "ID",
-        target: "ABCDEFG",
-        effect: "HIDE",
-        isRegex: true,
-        updatedAt: "2026-09-20T00:02:00.000Z",
-      },
-      {
-        scope: "egg.5ch.net/software",
-        targetType: "TEXT",
-        target: "NGワード",
-        effect: "NOP",
-        isRegex: false,
-        updatedAt: "2026-09-20T00:01:00.000Z",
-        hitAt: "2026-09-20T00:00:30.000Z",
-      },
-    ]);
-
-    await desktop.synchronizeWith(fixture.right);
-    assert.deepEqual(await new BbsSync({
-      storage: fixture.right,
-      deviceId: "mobile",
-    }).getFilters(), await desktop.getFilters());
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("keeps a newer filter removal over an older offline update after compaction", async () => {
-  const fixture = await createFixture(2, 1);
-  try {
-    const desktop = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const offline = createSync(fixture.right, "mobile", "2026-09-19T00:00:00Z");
-    await desktop.addFilter("egg.5ch.net/software", "ID", "ABCDEFG", "HIDE", {
-      updatedAt: "2026-09-20T00:00:00.000Z",
-    });
-    await desktop.clearFilter("egg.5ch.net/software", "ID", "ABCDEFG", {
-      updatedAt: "2026-09-20T00:01:00.000Z",
-    });
-    await desktop.compact();
-    await offline.addFilter("egg.5ch.net/software", "ID", "ABCDEFG", "HIDE", {
-      updatedAt: "2026-09-19T23:00:00.000Z",
-      hitAt: "2026-09-19T22:59:00.000Z",
-    });
-
-    await desktop.synchronizeWith(offline.storage);
-    assert.deepEqual(await desktop.getFilters(), []);
-    assert.deepEqual(await new BbsSync({
-      storage: offline.storage,
-      deviceId: "mobile",
-    }).getFilters(), []);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("uses locale-independent ordinal tie-breaks", () => {
-  const occurredAt = "2026-09-20T00:00:00.000Z";
-  const events: SyncEvent[] = [
-    {
-      v: 2,
-      id: "favorite-a",
-      deviceId: "device-a",
-      occurredAt,
-      threadId: "thread-1",
-      type: "thread.favorite.set",
-      level: 1,
-    },
-    {
-      v: 2,
-      id: "favorite-b",
-      deviceId: "device_a",
-      occurredAt,
-      threadId: "thread-1",
-      type: "thread.favorite.set",
-      level: 5,
-    },
-    {
-      v: 2,
-      id: "filter-a",
-      deviceId: "device-a",
-      occurredAt,
-      type: "filter.set",
-      scope: "egg.5ch.net/software",
-      targetType: "ID",
-      target: "ABCDEFG",
-      effect: "HIDE",
-      updatedAt: occurredAt,
-    },
-    {
-      v: 2,
-      id: "filter-b",
-      deviceId: "device_a",
-      occurredAt,
-      type: "filter.cleared",
-      scope: "egg.5ch.net/software",
-      targetType: "ID",
-      target: "ABCDEFG",
-      updatedAt: occurredAt,
-    },
-  ];
-
-  const thread = projectDetailedThreadStates(events).get("thread-1");
-  assert.equal(thread?.favoriteLevel, 5);
-  assert.equal(thread?.favoriteEvent?.deviceId, "device_a");
-
-  const filter = [...projectFilterStates(events).values()][0];
-  assert.equal(filter?.cleared, true);
-  assert.equal(filter?.deviceId, "device_a");
-});
-
-test("retains only the newest global post positions across threads during compaction", async () => {
-  const fixture = await createFixture(10, 0);
-  try {
-    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await sync.append([
-      { type: "thread.post.recorded", threadId: "thread-1", position: 10, occurredAt: "2026-09-01T00:00:00Z" },
-      { type: "thread.post.recorded", threadId: "thread-2", position: 20, occurredAt: "2026-09-02T00:00:00Z" },
-      { type: "thread.post.recorded", threadId: "thread-1", position: 11, occurredAt: "2026-09-03T00:00:00Z" },
-      { type: "thread.post.recorded", threadId: "thread-3", position: 30, occurredAt: "2026-09-04T00:00:00Z" },
-      { type: "thread.post.recorded", threadId: "thread-2", position: 21, occurredAt: "2026-09-05T00:00:00Z" },
-    ]);
-
-    const snapshot = await sync.compact({ maxGlobalPostPositions: 3 });
-    const thread1 = snapshot.threads.find((t) => t.threadId === "thread-1");
-    const thread2 = snapshot.threads.find((t) => t.threadId === "thread-2");
-    const thread3 = snapshot.threads.find((t) => t.threadId === "thread-3");
-
-    // The 3 newest posts are: thread-1:11 (09-03), thread-3:30 (09-04), thread-2:21 (09-05)
-    // Older posts (thread-1:10, thread-2:20) are trimmed
-    assert.deepEqual(thread1?.postPositions, [11]);
-    assert.deepEqual(thread2?.postPositions, [21]);
-    assert.deepEqual(thread3?.postPositions, [30]);
-    assert.deepEqual((await sync.getThreadState("thread-1"))?.postPositions, [11]);
-    assert.deepEqual((await sync.getThreadState("thread-2"))?.postPositions, [21]);
-    assert.deepEqual((await sync.getThreadState("thread-3"))?.postPositions, [30]);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("retains conflict markers while pruning inactive threads from snapshot", async () => {
-  const fixture = await createFixture(10, 0);
-  try {
-    // Current sync time is 2026-09-30
-    const sync = createSync(fixture.left, "desktop", "2026-09-30T00:00:00Z");
-    await sync.append([
-      // Thread A: Viewed 40 days ago (2026-08-21), no favorite, no posts -> should be pruned
-      { type: "thread.viewed", threadId: "thread-a", position: 5, occurredAt: "2026-08-21T00:00:00Z" },
-      // Thread B: Viewed 40 days ago, but has active favorite -> must be kept
-      { type: "thread.viewed", threadId: "thread-b", position: 10, occurredAt: "2026-08-21T00:00:00Z" },
-      { type: "thread.favorite.set", threadId: "thread-b", level: 3, occurredAt: "2026-08-21T00:00:00Z" },
-      // Thread C: Viewed 40 days ago, but has post position -> must be kept
-      { type: "thread.viewed", threadId: "thread-c", position: 15, occurredAt: "2026-08-21T00:00:00Z" },
-      { type: "thread.post.recorded", threadId: "thread-c", position: 12, occurredAt: "2026-08-21T00:00:00Z" },
-      // Thread D: Viewed 10 days ago (2026-09-20), within 30 days -> must be kept
-      { type: "thread.viewed", threadId: "thread-d", position: 20, occurredAt: "2026-09-20T00:00:00Z" },
-      // Thread E: Viewed 40 days ago, favorite set and cleared -> tombstone must be kept
-      { type: "thread.viewed", threadId: "thread-e", position: 25, occurredAt: "2026-08-21T00:00:00Z" },
-      { type: "thread.favorite.set", threadId: "thread-e", level: 2, occurredAt: "2026-08-21T00:00:00Z" },
-      { type: "thread.favorite.cleared", threadId: "thread-e", occurredAt: "2026-08-21T01:00:00Z" },
-    ]);
-
-    const snapshot = await sync.compact();
-    const threadIds = snapshot.threads.map((t) => t.threadId);
-    assert.deepEqual(threadIds, ["thread-b", "thread-c", "thread-d", "thread-e"]);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("throws SegmentDivergenceError when segments diverge during synchronization", async () => {
-  const fixture = await createFixture();
-  try {
-    const leftSync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    const ref = { deviceId: "desktop", segmentId: "manual-1" };
-    const event1: SyncEvent = {
-      v: 2,
-      id: "event-1",
-      deviceId: "desktop",
-      occurredAt: "2026-09-20T00:00:00.000Z",
-      threadId: "thread-1",
-      type: "thread.viewed",
-      position: 10,
-    };
-    const event2: SyncEvent = {
-      v: 2,
-      id: "event-2",
-      deviceId: "desktop",
-      occurredAt: "2026-09-20T00:00:00.000Z",
-      threadId: "thread-1",
-      type: "thread.viewed",
-      position: 20,
-    };
-
-    await fixture.left.writeSegment(ref, [event1]);
-    await fixture.right.writeSegment(ref, [event2]);
-
-    await assert.rejects(
-      () => leftSync.synchronizeWith(fixture.right),
-      (error: unknown) => {
-        assert(error instanceof BbsyncError);
-        assert(error instanceof SegmentDivergenceError);
-        assert.equal(error.deviceId, "desktop");
-        assert.equal(error.segmentId, "manual-1");
-        assert(/diverged/.test(error.message));
-        return true;
-      },
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("throws SnapshotCollisionError when same revision snapshots differ during synchronization", async () => {
-  const fixture = await createFixture();
-  try {
-    const leftSync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-
-    await fixture.left.writeSnapshot({
-      v: 2,
-      deviceId: "desktop",
-      revision: 1,
-      createdAt: "2026-09-20T00:00:00.000Z",
-      coveredSegments: [],
-      threads: [{ threadId: "thread-1", postPositions: [] }],
-      filters: [],
-    });
-
-    await fixture.right.writeSnapshot({
-      v: 2,
-      deviceId: "desktop",
-      revision: 1,
-      createdAt: "2026-09-20T00:00:00.000Z",
-      coveredSegments: [],
-      threads: [{ threadId: "thread-2", postPositions: [] }],
-      filters: [],
-    });
-
-    await assert.rejects(
-      () => leftSync.synchronizeWith(fixture.right),
-      (error: unknown) => {
-        assert(error instanceof BbsyncError);
-        assert(error instanceof SnapshotCollisionError);
-        assert.equal(error.deviceId, "desktop");
-        assert.equal(error.revision, 1);
-        assert(/collision/.test(error.message));
-        return true;
-      },
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("throws EventCollisionError when same event id has different contents", async () => {
-  const fixture = await createFixture();
-  try {
-    const ref1 = { deviceId: "desktop-1", segmentId: "seg-1" };
-    const ref2 = { deviceId: "desktop-2", segmentId: "seg-2" };
-    const event1: SyncEvent = {
-      v: 2,
-      id: "collision-event-1",
-      deviceId: "desktop-1",
-      occurredAt: "2026-09-20T00:00:00.000Z",
-      threadId: "thread-1",
-      type: "thread.viewed",
-      position: 10,
-    };
-    const event2: SyncEvent = {
-      v: 2,
-      id: "collision-event-1",
-      deviceId: "desktop-2",
-      occurredAt: "2026-09-20T00:00:00.000Z",
-      threadId: "thread-1",
-      type: "thread.viewed",
-      position: 20,
-    };
-
-    await fixture.left.writeSegment(ref1, [event1]);
-    await fixture.left.writeSegment(ref2, [event2]);
-
-    await assert.rejects(
-      () => readAllEvents(fixture.left),
-      (error: unknown) => {
-        assert(error instanceof BbsyncError);
-        assert(error instanceof EventCollisionError);
-        assert.equal(error.eventId, "collision-event-1");
-        assert(/collision/.test(error.message));
-        return true;
-      },
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("throws CoverageMismatchError when snapshot coverage exceeds segment length", async () => {
-  const fixture = await createFixture();
-  try {
-    const ref = { deviceId: "desktop", segmentId: "seg-1" };
-    await fixture.left.writeSegment(ref, [
-      {
-        v: 2,
-        id: "event-1",
-        deviceId: "desktop",
-        occurredAt: "2026-09-20T00:00:00.000Z",
-        threadId: "thread-1",
-        type: "thread.viewed",
-        position: 10,
-      },
-    ]);
-    await fixture.left.writeSnapshot({
-      v: 2,
-      deviceId: "desktop",
-      revision: 1,
-      createdAt: "2026-09-20T00:00:00.000Z",
-      coveredSegments: [{ segmentId: "seg-1", eventCount: 5 }],
-      threads: [],
-      filters: [],
-    });
-
-    const sync = createSync(fixture.left, "desktop", "2026-09-20T00:00:00Z");
-    await assert.rejects(
-      () => sync.getStates(),
-      (error: unknown) => {
-        assert(error instanceof BbsyncError);
-        assert(error instanceof CoverageMismatchError);
-        assert.equal(error.deviceId, "desktop");
-        assert.equal(error.segmentId, "seg-1");
-        assert.equal(error.coveredCount, 5);
-        assert.equal(error.actualCount, 1);
-        assert(/exceeds segment length/.test(error.message));
-        return true;
-      },
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-async function createFixture(
-  maxEventsPerSegment = 1_000,
-  retainSegmentsPerDevice = 1,
-): Promise<{
-  left: LocalEventStore;
-  right: LocalEventStore;
-  cleanup: () => Promise<void>;
-}> {
-  const root = await mkdtemp(join(tmpdir(), "bbsync-test-"));
-  return {
-    left: new LocalEventStore(join(root, "left"), {
-      maxEventsPerSegment,
-      retainSegmentsPerDevice,
-    }),
-    right: new LocalEventStore(join(root, "right"), {
-      maxEventsPerSegment,
-      retainSegmentsPerDevice,
-    }),
-    cleanup: () => rm(root, { recursive: true, force: true }),
-  };
+  BbsSync, DocumentConflictError, LocalStateStore, entryKey, mergeDocuments,
+  synchronizeStores, type StateChange, type StateDocument, type StateStore,
+} from "./index.js";
+
+const date = "2026-10-19T00:00:00.000Z";
+const thread = "egg.5ch.net/software/123";
+
+async function setup(t: { after: (cleanup: () => Promise<void>) => void }) {
+  const root = await mkdtemp(join(tmpdir(), "bbsync-v3-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const stores = ["a", "b", "c"].map((name) => new LocalStateStore(join(root, name)));
+  const [a, b, c] = stores.map((storage, index) => new BbsSync({
+    storage, deviceId: ["desktop", "mobile", "tablet"][index]!, clock: () => new Date(date),
+  }));
+  return { a: a!, b: b!, c: c!, left: stores[0]!, right: stores[1]!, third: stores[2]! };
 }
 
-function createSync(
-  storage: LocalEventStore,
-  deviceId: string,
-  time: string,
-): BbsSync {
-  let sequence = 0;
-  return new BbsSync({
-    storage,
-    deviceId,
-    clock: () => new Date(time),
-    idGenerator: () => `id-${deviceId}-${++sequence}`,
+test("records every field and projects only active values", async (t) => {
+  const { a } = await setup(t);
+  assert.deepEqual(await a.getStates(), new Map());
+  await a.setThreadMetadata(thread, "Title", "https://egg.5ch.net/test/read.cgi/software/123/");
+  await a.recordThreadView(thread, 125, 110);
+  await a.recordResponseCount(thread, 130);
+  await a.setFavorite(thread, 3);
+  await a.recordPost(thread, 126);
+  await a.recordPost(thread, 20);
+  await a.recordPost(thread, 126);
+  await a.setFilter("egg.5ch.net/software", "WORD", "^ng", "HIGHLIGHT", { isRegex: true, hitAt: date });
+  assert.deepEqual(await a.getThreadState(thread), {
+    threadId: thread, title: "Title", url: "https://egg.5ch.net/test/read.cgi/software/123/",
+    lastReadPosition: 125, firstReadPosition: 110, lastViewedAt: date,
+    responseCount: 130, favoriteLevel: 3, postPositions: [20, 126],
   });
-}
+  assert.deepEqual(await a.getFilters("egg.5ch.net/software"), [{
+    scope: "egg.5ch.net/software", targetType: "WORD", target: "^ng", effect: "HIGHLIGHT",
+    isRegex: true, updatedAt: date, hitAt: date,
+  }]);
+  assert.deepEqual(await a.getFilters("other"), []);
+  await a.clearThreadHistory(thread);
+  assert.deepEqual(await a.getThreadState(thread), {
+    threadId: thread, title: "Title", url: "https://egg.5ch.net/test/read.cgi/software/123/",
+    favoriteLevel: 3, postPositions: [20, 126],
+  });
+});
+
+test("latest view and count replace larger values and omitted optional fields", async (t) => {
+  const { a } = await setup(t);
+  await a.recordThreadView(thread, 100, 80);
+  await a.recordResponseCount(thread, 120);
+  await a.recordThreadView(thread, 10);
+  await a.recordResponseCount(thread, 15);
+  assert.deepEqual(await a.getThreadState(thread), {
+    threadId: thread, lastReadPosition: 10, lastViewedAt: date, responseCount: 15, postPositions: [],
+  });
+  await a.clearThreadHistory(thread);
+  assert.equal(await a.getThreadState(thread), undefined);
+});
+
+test("synchronization converges, is idempotent and preserves independent keys", async (t) => {
+  const { a, b, left, right } = await setup(t);
+  await a.setFavorite(thread, 3);
+  await b.recordPost(thread, 126);
+  assert.deepEqual(await a.synchronizeWith(right), { copiedToLeft: 1, copiedToRight: 1 });
+  assert.deepEqual(await a.getStates(), await b.getStates());
+  assert.deepEqual(await b.getThreadState(thread), { threadId: thread, favoriteLevel: 3, postPositions: [126] });
+  assert.deepEqual(await a.synchronizeWith(right), { copiedToLeft: 0, copiedToRight: 0 });
+  await a.setFavorite(thread, 5);
+  assert.deepEqual(await b.synchronizeWith(left), { copiedToLeft: 1, copiedToRight: 0 });
+  assert.equal((await b.getThreadState(thread))?.favoriteLevel, 5);
+});
+
+test("null deletes survive stale offline copies and later explicit updates restore them", async (t) => {
+  const { a, b, c, left, right, third } = await setup(t);
+  await a.recordThreadView(thread, 100);
+  await a.recordResponseCount(thread, 120);
+  await a.setFavorite(thread);
+  await a.recordPost(thread, 99);
+  await a.setFilter("scope", "ID", "user", "OMIT");
+  await a.synchronizeWith(right);
+  await a.synchronizeWith(third);
+  await b.clearThreadHistory(thread);
+  await b.clearFavorite(thread);
+  await b.clearPost(thread, 99);
+  await b.clearFilter("scope", "ID", "user");
+  await b.synchronizeWith(left);
+  await a.synchronizeWith(third);
+  for (const client of [a, b, c]) {
+    assert.equal(await client.getThreadState(thread), undefined);
+    assert.deepEqual(await client.getFilters(), []);
+  }
+  const tombstones = (await right.readDocument("mobile"))!.entries;
+  assert.equal(tombstones.length, 5);
+  assert.ok(tombstones.every((entry) => entry.value === null));
+  await c.recordPost(thread, 99);
+  await c.synchronizeWith(left);
+  await a.synchronizeWith(right);
+  assert.deepEqual(await a.getThreadState(thread), { threadId: thread, postPositions: [99] });
+  assert.deepEqual(await a.getStates(), await b.getStates());
+});
+
+test("logical revisions preserve observed order despite clock reversal or future timestamps", async (t) => {
+  const { left, right } = await setup(t);
+  const a = new BbsSync({ storage: left, deviceId: "desktop", clock: () => new Date("2099-01-01T00:00:00.000Z") });
+  const b = new BbsSync({ storage: right, deviceId: "mobile", clock: () => new Date("2000-01-01T00:00:00.000Z") });
+  await a.setFilter("scope", "ID", "user", "OMIT");
+  await a.synchronizeWith(right);
+  await b.setFilter("scope", "ID", "user", "NOP");
+  await b.synchronizeWith(left);
+  assert.equal((await a.getFilters())[0]?.effect, "NOP");
+  assert.equal((await right.readDocument("mobile"))!.revision, 2);
+});
+
+test("item revisions determine conflicts independently of document revisions", () => {
+  const a: StateDocument = { v: 3, deviceId: "device-a", revision: 100, entries: [
+    { key: ["favorite", thread], value: 1, revision: 1 },
+    { key: ["count", thread], value: 20, revision: 100 },
+  ] };
+  const b: StateDocument = { v: 3, deviceId: "device_b", revision: 2, entries: [
+    { key: ["favorite", thread], value: 5, revision: 2 },
+  ] };
+  const c: StateDocument = { v: 3, deviceId: "device-c", revision: 2, entries: [
+    { key: ["favorite", thread], value: null, revision: 2 },
+  ] };
+  for (const documents of [[a, b, c], [c, b, a], [b, a, c], [a, b, c, b, a]]) {
+    const merged = mergeDocuments(documents);
+    assert.equal(merged.get(entryKey(["favorite", thread]))?.value, 5);
+    assert.deepEqual(merged, mergeDocuments([a, b, c]));
+  }
+});
+
+test("batch updates are atomic, use one revision, and serialize rapid local changes", async (t) => {
+  const { a, left } = await setup(t);
+  await a.update([
+    { key: ["favorite", thread], value: 2 },
+    { key: ["post", thread, 10], value: true },
+  ]);
+  assert.ok((await left.readDocument("desktop"))!.entries.every((entry) => entry.revision === 1));
+  await Promise.all(Array.from({ length: 20 }, (_, n) => a.recordPost(thread, n + 1)));
+  assert.equal((await left.readDocument("desktop"))!.revision, 21);
+  assert.equal((await a.getThreadState(thread))!.postPositions.length, 20);
+  const unchanged = await left.readDocument("desktop");
+  await a.update([]);
+  await assert.rejects(() => a.update([
+    { key: ["favorite", thread], value: 1 }, { key: ["favorite", thread], value: null },
+  ]), /duplicate/);
+  assert.deepEqual(await left.readDocument("desktop"), unchanged);
+});
+
+test("updates recover from failed storage writes without losing previous state", async (t) => {
+  const { left } = await setup(t);
+  let fail = true;
+  const storage: StateStore = {
+    listDocuments: () => left.listDocuments(), readDocument: (id) => left.readDocument(id),
+    writeDocument: (doc) => { if (fail) { fail = false; return Promise.reject(new Error("offline")); } return left.writeDocument(doc); },
+  };
+  const client = new BbsSync({ storage, deviceId: "desktop" });
+  await assert.rejects(() => client.setFavorite(thread, 3), /offline/);
+  await client.setFavorite(thread, 5);
+  assert.equal((await client.getThreadState(thread))?.favoriteLevel, 5);
+  assert.equal((await left.readDocument("desktop"))!.revision, 1);
+});
+
+test("sync detects forks before copying any documents", async (t) => {
+  const { a, b, left, right } = await setup(t);
+  await a.setFavorite(thread, 3);
+  await right.writeDocument({ v: 3, deviceId: "desktop", revision: 1,
+    entries: [{ key: ["favorite", thread], value: 5, revision: 1 }] });
+  await b.recordPost(thread, 10);
+  await assert.rejects(() => synchronizeStores(left, right), DocumentConflictError);
+  assert.deepEqual(await left.listDocuments(), ["desktop"]);
+});
+
+test("newer forked documents cannot silently discard deletions", async (t) => {
+  const { a, left, right } = await setup(t);
+  await a.clearFavorite(thread);
+  await right.writeDocument({ v: 3, deviceId: "desktop", revision: 2,
+    entries: [{ key: ["post", thread, 10], value: true, revision: 2 }] });
+  await assert.rejects(() => synchronizeStores(left, right), DocumentConflictError);
+});
+
+test("validation rejects malformed values and exhausted logical revisions", async (t) => {
+  const { a, left } = await setup(t);
+  const invalid: unknown[] = [
+    { key: ["view", thread], value: { position: 2, firstPosition: 3, viewedAt: date } },
+    { key: ["view", thread], value: { position: 2, viewedAt: "2026-02-30T00:00:00.000Z" } },
+    { key: ["metadata", thread], value: { title: "title", url: "/relative" } },
+    { key: ["post", thread, 0], value: true },
+    { key: ["filter", "s", "ID", "x"], value: { effect: "OMIT", isRegex: false, updatedAt: date, hitAt: null } },
+    { key: ["count", thread], value: Number.MAX_SAFE_INTEGER + 1 },
+  ];
+  for (const change of invalid) await assert.rejects(() => a.update([change as StateChange]), TypeError);
+  await left.writeDocument({ v: 3, deviceId: "mobile", revision: Number.MAX_SAFE_INTEGER,
+    entries: [{ key: ["favorite", thread], value: 1, revision: Number.MAX_SAFE_INTEGER }] });
+  await assert.rejects(() => a.setFavorite(thread), /revision exhausted/);
+  assert.equal(await left.readDocument("desktop"), undefined);
+});
+
+test("filter tuple keys remain distinct when their strings contain separators", async (t) => {
+  const { a } = await setup(t);
+  await a.setFilter("a/b", "c", "d", "OMIT");
+  await a.setFilter("a", "b/c", "d", "NOP");
+  assert.equal((await a.getFilters()).length, 2);
+  await a.clearFilter("a/b", "c", "d");
+  assert.equal((await a.getFilters())[0]?.effect, "NOP");
+});
+
+test("typed setting helpers reject explicit null instead of performing a deletion", async (t) => {
+  const { a } = await setup(t);
+  await a.setFavorite(thread, 3);
+  await assert.rejects(() => a.setFavorite(thread, null as never), TypeError);
+  await assert.rejects(() => a.recordResponseCount(thread, null as never), TypeError);
+  await assert.rejects(() => a.setFilter("s", "ID", "x", "OMIT", { isRegex: null as never }), TypeError);
+  await assert.rejects(() => a.setFilter("s", "ID", "x", "OMIT", { updatedAt: null as never }), TypeError);
+  assert.equal((await a.getThreadState(thread))?.favoriteLevel, 3);
+});

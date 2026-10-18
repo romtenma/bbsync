@@ -1,166 +1,72 @@
 # bbsync
 
-掲示板クライアント間で、スレッドのタイトル、遷移先URL、閲覧位置、レス数、お気に入りレベル、書き込み位置、フィルターを共有するためのNode.jsモジュールです。クライアント固有のデータ変換は各クライアント側のアダプターが担当し、このパッケージはJSONLの読み書き、状態の統合、ストレージ間同期を担当します。
+掲示板クライアントの閲覧状態・お気に入り・書き込み位置・フィルターを端末間で共有する Node.js モジュールです。
+端末ごとの現在値を JSON に保存し、項目ごとに新しい更新を採用します。仕様は [同期プロトコル v3](docs/protocol.md) にまとめています。
 
-現在はローカルファイルストレージを実装しています。将来のGoogle Driveストレージも同じ`EventStore`インターフェースで追加できます。
-
-専用ブラウザのアダプターを実装する場合は、識別子の正規化、イベントの発火条件、同期状態の反映方法を定めた[アダプターイベント仕様 v2](docs/adapter-event-protocol-v2.md)を参照してください。
-
-別のプログラミング言語で互換実装を作る場合は、JSON形式、競合解決、EventStore契約、同期手順、compact、適合テストをまとめた[他言語実装ガイド v2](docs/porting-guide.md)を参照してください。
-
-## インストール
+## 使い方
 
 ```sh
 npm install @romtenma/bbsync
 ```
 
-## 基本例
-
 ```ts
-import { BbsSync, LocalEventStore } from "@romtenma/bbsync";
+import { BbsSync, LocalStateStore } from "@romtenma/bbsync";
 
-const local = new LocalEventStore("./bbsync-data", {
-  maxEventsPerSegment: 1_000,
-  retainSegmentsPerDevice: 1,
-});
 const sync = new BbsSync({
-  storage: local,
-  deviceId: "desktop-main",
+  storage: new LocalStateStore("./bbsync-v3"),
+  deviceId: "desktop-main", // 初回に生成して保存。端末ごとに別の値を使う
 });
+const threadId = "egg.5ch.net/software/1234567890";
 
-await sync.recordThreadView("egg.5ch.net/software/1234567890", 125, 110);
-await sync.setThreadMetadata(
-  "egg.5ch.net/software/1234567890",
-  "ソフトウェア板のスレッド",
-  "https://egg.5ch.net/test/read.cgi/software/1234567890/",
-);
-await sync.recordResponseCount("egg.5ch.net/software/1234567890", 130);
-await sync.setFavorite("egg.5ch.net/software/1234567890", 3);
-await sync.clearFavorite("egg.5ch.net/software/1234567890");
-await sync.recordPost("egg.5ch.net/software/1234567890", 126);
-await sync.clearPost("egg.5ch.net/software/1234567890", 126);
-// 閲覧履歴から削除する（削除操作も全端末へ同期される）
-await sync.clearThreadHistory("egg.5ch.net/software/1234567890");
-
-// フィルターは対象種別・対象文字列・表示効果を分けて同期する
+await sync.setThreadMetadata(threadId, "スレッドのタイトル",
+  "https://egg.5ch.net/test/read.cgi/software/1234567890/");
+await sync.recordThreadView(threadId, 125, 110); // 最後と最初の表示レス番号
+await sync.recordResponseCount(threadId, 130);
+await sync.setFavorite(threadId, 3);
+await sync.recordPost(threadId, 126);
 await sync.setFilter("egg.5ch.net/software", "ID", "ABCDEFG", "OMIT");
-await sync.setFilter("egg.5ch.net/software", "SLIP", "xxxx-yyyy", "NOP", {
-  hitAt: "2026-09-20T01:22:00.000Z",
-});
-await sync.setFilter("egg.5ch.net/software", "WORD", "^NG.*", "HIGHLIGHT", {
-  isRegex: true,
-});
-const filters = await sync.getFilters("egg.5ch.net/software");
-await sync.clearFilter("egg.5ch.net/software", "ID", "ABCDEFG");
 
-const state = await sync.getThreadState("egg.5ch.net/software/1234567890");
-
-// 現在状態をスナップショット化し、古い自端末セグメントを整理する
-await sync.compact();
+await sync.synchronizeWith(new LocalStateStore("./shared-bbsync-v3"));
+const threads = await sync.getStates();
+const filters = await sync.getFilters();
 ```
 
-`threadId`はこのモジュールにとって不透明な文字列です。タイトルやURLはキーに使いません。アダプターはサーバーを含む識別子を生成し、ホスト名を小文字化し、末尾のドットを除去した値を使用してください。
+同期結果をクライアントへ反映する間は、変更通知から同じ更新を再送しないようにしてください。
 
-shitaraba のように板キーに`/`を含むサイトでは、`/`を`.`に置換した値を板キーとして扱います。ただし、この変換は bbsync 本体では行わず、アダプター側で正規化してください。
+## API
 
-サーバー名をURLから取り出す場合は、`normalizeHostname()`を使用できます。返されたホスト名をそのまま`threadId`や`scope`のサーバー部分に使用します。サブドメインもそのまま保持されるため、サーバー移転前後の識別子を誤って統合しません。
+| 操作 | メソッド |
+| --- | --- |
+| タイトル・URL | `setThreadMetadata(threadId, title, url)` |
+| 閲覧位置 | `recordThreadView(threadId, position, firstPosition?)` |
+| レス数 | `recordResponseCount(threadId, count)` |
+| 閲覧位置・日時とレス数を削除 | `clearThreadHistory(threadId)` |
+| お気に入りの設定・解除 | `setFavorite(threadId, level = 1)` / `clearFavorite(threadId)` |
+| 自分の書き込み位置の記録・削除 | `recordPost(threadId, position)` / `clearPost(threadId, position)` |
+| フィルターの設定・解除 | `setFilter(scope, targetType, target, effect, options?)` / `clearFilter(scope, targetType, target)` |
+| 状態の取得 | `getStates()` / `getThreadState(threadId)` / `getFilters(scope?)` |
+| 一括更新 | `update(changes)`。同じキーの重複はエラー、空配列は何もしない |
+| 双方向同期 | `synchronizeWith(store)`。コピーした文書数を `{ copiedToLeft, copiedToRight }` で返す |
 
-```ts
-import { normalizeHostname } from "@romtenma/bbsync";
+更新メソッドは `Promise<void>` を返します。フィルターの `options` は `isRegex`（既定 `false`）、`updatedAt`（既定は現在時刻）、`hitAt`（任意）です。日時は表示用で、更新の競合判定には使いません。
 
-normalizeHostname("https://egg.5ch.net/test/read.cgi/software/123/");
-// "egg.5ch.net"
-normalizeHostname("https://may.2chan.net/b/");
-// "may.2chan.net"
-normalizeHostname("https://sub.testtest.net/board/");
-// "sub.testtest.net"
+## 保存と拡張
+
+ファイルは `<root>/devices/<deviceId>.json` です。同じ項目の更新は置き換えるためイベント履歴は増えません。削除情報は残し、自動期限切れや件数制限は設けません。容量と転送量は端末数と、一度でも記録したキーの数に応じて増えます。
+
+1つのディレクトリには1つの `LocalStateStore` インスタンスを使い、同じ `deviceId` の更新元も1つにします。端末IDには保存した UUID を推奨します。端末の複製やデータの作り直し時には新しいIDを生成してください。
+
+独自ストレージは `StateStore` の3操作を実装します。共通契約テストは [src/state-store.contract.ts](src/state-store.contract.ts) にあります。ファイルの分岐・過去のキーの欠落は `DocumentConflictError`、不正なデータは `TypeError` または JSON パースエラーとして報告します。
+
+## v2 からの変更
+
+v3 は旧プロトコル・保存データ・API と互換性がありません。新しい保存先を使い、必要な現在値だけをクライアントから取り込んでください。旧ディレクトリを指定するとエラーになり、旧データは変更しません。
+
+- イベント・JSONL・セグメント・スナップショット・`compact()` を廃止しました。
+- 全項目を論理カウンターによる最新更新優先に統一しました。閲覧位置とレス数は小さい値にも更新できます。
+- `LocalEventStore` / `EventStore` は `LocalStateStore` / `StateStore` に置き換えました。一括更新は `append()` から `update()` に変更しました。
+- `addFilter()` / `removeFilter()` の別名APIと、旧保持設定は廃止しました。
+
+```sh
+npm test
 ```
-
-既に保存済みの旧形式イベントの`threadId`と`scope`は自動変換されません。既存データを移行する場合は、メタデータのURLなどからサーバー名を確定したうえで、関連するイベントをまとめて変換してください。サーバー名を確定できないデータは自動移行の対象外です。
-
-フィルターは、`scope`、`targetType`、`target`の組で対象を識別し、`effect`で一致時の表示効果を指定します。`targetType`と`effect`の値は専用ブラウザが定義します。推奨値の例は、`targetType`が`ID`、`SLIP`、`SLIP-PRE`、`SLIP-SUF`、`MAIL`、`NAME`、`TRIP`、`WORD`、`effect`が`OMIT`、`NOP`、`HIGHLIGHT`です。`scope`には`egg.5ch.net/software`のようなサーバー・板キーを指定します。
-
-フィルター情報には必須の`updatedAt`と、条件がスレッド内に現れた日時を表す任意の`hitAt`があります。`isRegex`を`true`にすると`target`を正規表現として扱い、省略時または`false`の場合は通常の一致として扱います。`updatedAt`を省略した場合はローカル時計から自動設定されます。解除も同期され、古いオフライン端末の更新によって復活しないように扱われます。
-
-## 同期
-
-```ts
-const remote = new LocalEventStore("./another-device-data");
-const result = await sync.synchronizeWith(remote);
-```
-
-同期は、不足しているJSONLセグメントと端末別スナップショットを双方向にコピーします。書き込み中のセグメントが前回の同期後に伸びている場合は、既存内容が完全な接頭辞であることを検証して長い方へ更新します。同じ同期を繰り返しても新しいコピーは作られません。スナップショットが完全に被覆するセグメントだけが、各ストレージの`retainSegmentsPerDevice`設定に従って整理対象になります。
-
-## 保存形式
-
-```text
-bbsync-data/
-  devices/
-    desktop-main/
-      snapshot.json
-      events/
-        <segment-id>.jsonl  # 既定で最大1,000イベント
-```
-
-各行はバージョン付きイベントです。
-
-```json
-{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:40.000Z","threadId":"egg.5ch.net/software/1234567890","type":"thread.metadata.updated","title":"ソフトウェア板のスレッド","url":"https://egg.5ch.net/test/read.cgi/software/1234567890/"}
-{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:23:45.000Z","threadId":"egg.5ch.net/software/1234567890","type":"thread.viewed","position":125,"firstPosition":110}
-{"v":2,"id":"...","deviceId":"desktop-main","occurredAt":"2026-09-20T01:24:00.000Z","type":"filter.set","scope":"egg.5ch.net/software","targetType":"ID","target":"ABCDEFG","effect":"OMIT","isRegex":false,"updatedAt":"2026-09-20T01:24:00.000Z","hitAt":"2026-09-20T01:23:59.000Z"}
-```
-
-## 統合規則
-
-- 閲覧位置: `position`（表示上の最後）は最大の位置を採用。`firstPosition`（表示上の最初）は最新の`thread.viewed`に指定された値を採用し、省略時は未設定
-- タイトル・URL: 一組として扱い、`occurredAt`が新しい更新を採用。同時刻の場合は端末IDとイベントIDで決定
-- 閲覧日時: `thread.viewed`の`occurredAt`が新しい日時を採用
-- 閲覧履歴削除: `thread.history.cleared`より前の閲覧位置・閲覧日時・レス数を無効化。削除後に再閲覧すると新しい履歴として復活
-- レス数: 端末間で観測した最大値を採用
-- お気に入り: 1〜5のレベルで管理。省略時はレベル1。`occurredAt`が新しい操作を採用し、同時刻の場合は端末IDとイベントIDで決定
-- 書き込み位置: 位置ごとに `thread.post.recorded` と `thread.post.cleared` の新しい方を採用。有効な記録と削除マーカーの競合情報をスナップショットにも保持し、古いオフライン端末との同期で状態が逆転しないようにする。スナップショット作成時（`compact()`）に有効な位置を全スレッドをまたいで最新1,000件（既定）まで保持
-- イベント: イベントIDで重複排除。同じIDで内容が異なる場合はエラー
-- セグメント: `maxEventsPerSegment`件で次のファイルへローテーション
-- フィルター: `scope`、`targetType`、`target`の組をキーに、`updatedAt`が新しい状態を採用。`effect`は対象の表示効果、`isRegex`は正規表現として扱うかどうかを表す（省略時は`false`）
-- スナップショット: 現在状態と競合解決情報を端末別に保存。履歴・お気に入り・書き込み位置の削除マーカーがなく、お気に入りや書き込みもなく、最終閲覧またはメタデータ更新から30日経過したスレッドは自動的に除外
-
-`clearThreadHistory()`は閲覧履歴と観測済みレス数の削除を記録します。削除イベントは対象が現在存在しなくても保存し、古いオフライン端末の閲覧履歴が同期後に復活しないようにします。お気に入りと書き込み位置は履歴削除の対象外です。
-
-`clearFavorite()`はお気に入り解除を記録します。解除後に古い端末のレベル設定が復活しないよう、解除も最終更新情報としてスナップショットへ保存されます。
-`clearPost()`は指定した自分の書き込み位置を削除します。削除対象が現在存在しなくても削除マーカーを保存し、同じ位置の古いオフラインイベントが同期後に復活しないようにします。削除後に同じ位置を`recordPost()`すると、新しい記録として再び保持されます。
-`clearFilter()`も同様に解除情報を保存します。
-
-セグメントは追記方向にだけ更新できます。同じセグメントの両側が異なる内容へ分岐した場合は、データを暗黙に選ばず同期エラーにします。1つの`deviceId`に対する書き込み元は常に1端末に限定してください。
-
-`compact()`は自動では実行されません。利用側クライアントで同期の区切りなどに呼び出してください。スナップショット作成時に `maxGlobalPostPositions`（既定1,000件）および `retentionPeriodMs`（既定30日）による保持ポリシーが適用され、完全に被覆された古い自端末セグメントも整理されます。スナップショット作成後も、既定では最新セグメントを1つ保持します。最終更新優先の項目の競合解決は端末時計に依存します。Google Drive対応前に、時計ずれへの対策が必要かを検討します。
-
-## エラーハンドリング
-
-同期処理やストレージ書き込み、データ投影時に不整合を検出した場合は、基底クラス `BbsyncError` を継承した以下のカスタム例外がスローされます。
-
-| 例外クラス | 発生条件 | 主なプロパティ |
-| --- | --- | --- |
-| `SegmentDivergenceError` | 同一セグメントが異なる内容へ分岐したとき | `deviceId`, `segmentId`, `path` |
-| `SnapshotCollisionError` | 同一端末・同一リビジョンで異なる内容のスナップショットが衝突したとき | `deviceId`, `revision` |
-| `EventCollisionError` | 同一イベントIDで異なる内容のイベントが衝突したとき | `eventId` |
-| `CoverageMismatchError` | スナップショットの被覆イベント件数が実際のセグメント件数を超過したとき | `deviceId`, `segmentId`, `coveredCount`, `actualCount` |
-
-```ts
-import { BbsyncError, SegmentDivergenceError } from "@romtenma/bbsync";
-
-try {
-  await sync.synchronizeWith(remote);
-} catch (error) {
-  if (error instanceof SegmentDivergenceError) {
-    console.error(`セグメント分岐が発生しました: ${error.deviceId}/${error.segmentId}`);
-  } else if (error instanceof BbsyncError) {
-    console.error(`bbsync 同期・整合性エラー: ${error.message}`);
-  } else {
-    throw error;
-  }
-}
-```
-
-## EventStore契約テスト
-
-ストレージ実装を追加する場合は、`src/event-store.contract.ts`の`registerEventStoreContractTests`へ実装用fixtureを渡すことで、ローカル実装と同じ契約テストを実行できます。Google Drive版では、ファイル一覧、取得、作成・更新、スナップショット、整理処理がこの契約を満たす必要があります。

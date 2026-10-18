@@ -1,7 +1,7 @@
 {
   "name": "@romtenma/bbsync",
-  "version": "2.7.0",
-  "description": "JSONL-based synchronization primitives for bulletin board clients",
+  "version": "3.0.0",
+  "description": "Simple per-device state synchronization for bulletin board clients",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,15 +17,15 @@
     "dist/**/*.d.ts",
     "!dist/**/*.test.js",
     "!dist/**/*.test.d.ts",
-    "!dist/event-store.contract.js",
-    "!dist/event-store.contract.d.ts",
+    "!dist/state-store.contract.js",
+    "!dist/state-store.contract.d.ts",
     "docs/**/*.md",
     "README.md"
   ],
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/bbsync.test.js dist/local-event-store.contract.test.js dist/server.test.js",
+    "test": "npm run build && node --test dist/bbsync.test.js dist/local-state-store.contract.test.js dist/server.test.js",
     "prepack": "npm test"
   },
   "repository": {
@@ -39,8 +39,8 @@
   "keywords": [
     "bbs",
     "sync",
-    "jsonl",
-    "event-store"
+    "json",
+    "state-store"
   ],
   "publishConfig": {
     "access": "public"

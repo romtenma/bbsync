@@ -1,72 +1,14 @@
 export { BbsSync, type BbsSyncOptions } from "./bbsync.js";
-export {
-  BbsyncError,
-  CoverageMismatchError,
-  EventCollisionError,
-  SegmentDivergenceError,
-  SnapshotCollisionError,
-  type SegmentIdentifier,
-} from "./errors.js";
-export { LocalEventStore } from "./local-event-store.js";
-export {
-  projectDetailedThreadStates,
-  projectFilterStates,
-  projectThreadStates,
-  readAllEvents,
-  readProjectedFilters,
-  readProjectedStates,
-  snapshotFromStates,
-  isProjectedThreadStateVisible,
-  type ProjectedFilterState,
-  type ProjectedPostRecord,
-  type ProjectedThreadState,
-} from "./project.js";
-export { segmentKey, type EventStore } from "./store.js";
+export { BbsyncError, DocumentConflictError } from "./errors.js";
+export { LocalStateStore } from "./local-state-store.js";
+export { mergeDocuments } from "./project.js";
+export { entryKey, type StateStore } from "./store.js";
 export { synchronizeStores } from "./synchronize.js";
 export { normalizeHostname } from "./server.js";
 export {
-  DEFAULT_MAX_GLOBAL_POST_POSITIONS,
-  DEFAULT_THREAD_RETENTION_PERIOD_MS,
-  EVENT_SCHEMA_VERSION,
-  type CompactOptions,
-  type EventSchemaVersion,
-  type FavoriteClearedEvent,
-  type FavoriteClearedInput,
-  type FavoriteLevel,
-  type FavoriteSetEvent,
-  type FavoriteSetInput,
-  type FilterClearedEvent,
-  type FilterClearedInput,
-  type FilterEffect,
-  type FilterEntry,
-  type FilterSetEvent,
-  type FilterSetInput,
-  type FilterTargetType,
-  type PostClearedEvent,
-  type PostClearedInput,
-  type PostRecordedEvent,
-  type PostRecordedInput,
-  type SegmentRef,
-  type SegmentCoverage,
-  type SnapshotFavorite,
-  type SnapshotHistoryCleared,
-  type SnapshotPostCleared,
-  type SnapshotPostRecorded,
-  type SnapshotThreadState,
-  type SnapshotThreadMetadata,
-  type SnapshotViewed,
-  type SnapshotFilter,
-  type StateSnapshot,
-  type SyncEvent,
-  type SyncEventInput,
-  type SynchronizeResult,
-  type ThreadState,
-  type ThreadMetadataUpdatedEvent,
-  type ThreadMetadataUpdatedInput,
-  type ThreadResponseCountObservedEvent,
-  type ThreadResponseCountObservedInput,
-  type ThreadViewedEvent,
-  type ThreadViewedInput,
-  type ThreadHistoryClearedEvent,
-  type ThreadHistoryClearedInput,
+  SCHEMA_VERSION,
+  type FavoriteLevel, type FilterEffect, type FilterEntry, type FilterTargetType,
+  type FilterValue, type MergedEntry, type StateChange, type StateDocument,
+  type StateEntry, type StateKey, type SynchronizeResult, type ThreadMetadata,
+  type ThreadState, type ThreadView,
 } from "./types.js";
