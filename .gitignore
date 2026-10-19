@@ -4,5 +4,6 @@ coverage/
 .github/
 .npm-cache/
 .vscode/
+/work
 *.tmp
 *.log

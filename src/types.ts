@@ -59,6 +59,13 @@ export interface StateDocument {
 
 export type MergedEntry = StateEntry & { readonly deviceId: string };
 
+/** Missing keys are never deletion instructions; only value: null deletes. */
+export interface ApplicationSnapshot {
+  readonly evaluatedAt: string;
+  readonly policy: { readonly syncLevel: SyncLevel; readonly historyRetentionMs: number };
+  readonly entries: readonly MergedEntry[];
+}
+
 export interface FilterEntry extends FilterValue {
   readonly scope: string;
   readonly targetType: FilterTargetType;

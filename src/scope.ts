@@ -1,5 +1,5 @@
 import { mergeDocuments } from "./project.js";
-import { documentFromEntries } from "./store.js";
+import { documentFromEntries, entryKey } from "./store.js";
 import {
   DEFAULT_HISTORY_RETENTION_MS, type StateChange, type StateDocument,
   type StateEntry, type SyncPolicy, type TabState, type ThreadView,
@@ -38,6 +38,15 @@ export function createScope(documents: readonly StateDocument[], policy: SyncPol
     return viewedAt >= cutoff && viewedAt <= time;
   };
   const favorites = favoriteThreads(documents);
+  // Null has no timestamp in v3. Explicit deletions do not expire. Select
+  // whole keys before merging so an old null cannot hide a newer live value.
+  const candidates = new Set<string>();
+  for (const document of documents) for (const entry of document.entries) {
+    if (entry.value === null && canWrite(entry, policy, favorites)) candidates.add(entryKey(entry.key));
+  }
+  const deletions = new Set([...mergeDocuments(filterDocuments(documents,
+    (entry) => candidates.has(entryKey(entry.key)))).values()]
+    .filter((entry) => entry.value === null).map((entry) => entryKey(entry.key)));
   const recent = new Set<string>();
   if (policy.syncLevel >= 2) {
     for (const document of documents) for (const entry of document.entries) {
@@ -65,6 +74,7 @@ export function createScope(documents: readonly StateDocument[], policy: SyncPol
     if (entry.key[0] === "tabs") for (const tab of (entry.value as TabState).tabs) related.add(tab.threadId);
   }
   return ({ key }) => {
+    if (deletions.has(entryKey(key))) return true;
     switch (key[0]) {
       case "favorite": return true;
       case "filter": return policy.syncLevel >= 3;

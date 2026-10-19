@@ -2,12 +2,79 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DocumentConflictError } from "./errors.js";
-import type { StateStore } from "./store.js";
+import { mergeDocuments } from "./project.js";
+import { mergeDeviceDocuments, type StateStore } from "./store.js";
+import { synchronizeStores } from "./synchronize.js";
 import type { StateDocument, StateEntry } from "./types.js";
 
 export interface StateStoreFixture {
   readonly store: StateStore;
   readonly cleanup: () => Promise<void>;
+}
+
+export interface SharedStateStoreFixture {
+  /** Independent clients connected to the same backing store. */
+  readonly clients: readonly [StateStore, StateStore];
+  readonly cleanup: () => Promise<void>;
+}
+
+/** A separate suite: passing the basic suite does not certify shared access. */
+export function registerSharedStateStoreContractTests(name: string, create: () => Promise<SharedStateStoreFixture>): void {
+  test(`${name}: independent clients retain disjoint concurrent partial writes`, async () => {
+    const { clients: [left, right], cleanup } = await create();
+    try {
+      const make = (key: string): StateDocument => ({ v: 3, deviceId: "writer", revision: 1,
+        entries: [{ key: ["favorite", key], value: 1, revision: 1 }] });
+      await Promise.all([left.writeDocument(make("a")), right.writeDocument(make("b"))]);
+      assert.equal((await left.readDocument("writer"))!.entries.length, 2);
+      assert.deepEqual(await left.readDocument("writer"), await right.readDocument("writer"));
+    } finally { await cleanup(); }
+  });
+  test(`${name}: independent clients preserve deletions, reject forks and accept retries`, async () => {
+    const { clients: [left, right], cleanup } = await create();
+    try {
+      const initial: StateDocument = { v: 3, deviceId: "writer", revision: 1,
+        entries: [{ key: ["favorite", "a"], value: 1, revision: 1 }] };
+      const deleted: StateDocument = { ...initial, revision: 2,
+        entries: [{ key: ["favorite", "a"], value: null, revision: 2 }] };
+      await Promise.all([left.writeDocument(deleted), right.writeDocument(initial)]);
+      await right.writeDocument(deleted);
+      assert.equal((await left.readDocument("writer"))!.entries[0]!.value, null);
+      await assert.rejects(() => right.writeDocument({ ...deleted,
+        entries: [{ key: ["favorite", "a"], value: 3, revision: 2 }] }), DocumentConflictError);
+      await right.writeDocument({ ...initial, revision: 3,
+        entries: [{ key: ["favorite", "a"], value: 3, revision: 3 }] });
+      assert.equal((await left.readDocument("writer"))!.entries[0]!.value, 3);
+    } finally { await cleanup(); }
+  });
+  test(`${name}: synchronization retries partial success and converges through independent clients`, async () => {
+    const { clients: [left, right], cleanup } = await create();
+    try {
+      const documents = new Map<string, StateDocument>();
+      const peer: StateStore = {
+        listDocuments: async () => [...documents.keys()],
+        readDocument: async (id) => structuredClone(documents.get(id)),
+        writeDocument: async (doc) => { documents.set(doc.deviceId, mergeDeviceDocuments(documents.get(doc.deviceId), structuredClone(doc))); },
+      };
+      for (const [deviceId, value] of [["a", 1], ["b", 5]] as const) await peer.writeDocument({
+        v: 3, deviceId, revision: 1, entries: [{ key: ["favorite", "t"], value, revision: 1 }],
+      });
+      let loseResponse = true;
+      const unstable: StateStore = {
+        listDocuments: () => left.listDocuments(), readDocument: (id) => left.readDocument(id),
+        async writeDocument(doc) {
+          await left.writeDocument(doc);
+          if (loseResponse) { loseResponse = false; throw new Error("injected response loss"); }
+        },
+      };
+      await assert.rejects(() => synchronizeStores(peer, unstable, { syncLevel: 5 }), /injected response loss/);
+      assert.equal((await right.listDocuments()).length, 1);
+      await synchronizeStores(peer, right, { syncLevel: 5 });
+      const saved = await Promise.all((await right.listDocuments()).map((id) => right.readDocument(id)));
+      assert.equal([...mergeDocuments(saved as StateDocument[]).values()][0]!.value, 5);
+      assert.deepEqual(await synchronizeStores(peer, left, { syncLevel: 5 }), { copiedToLeft: 0, copiedToRight: 0 });
+    } finally { await cleanup(); }
+  });
 }
 
 export function registerStateStoreContractTests(name: string, create: () => Promise<StateStoreFixture>): void {

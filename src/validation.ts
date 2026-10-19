@@ -11,6 +11,12 @@ export function assertNonEmptyString(value: unknown, name: string): asserts valu
   if (typeof value !== "string" || value.length === 0) throw new TypeError(`${name} must be a non-empty string`);
 }
 
+export function assertSessionId(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
+    throw new TypeError("sessionId must be 1-128 ASCII letters, digits, underscores or hyphens");
+  }
+}
+
 export function assertDateTime(value: unknown): asserts value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) ||
     !Number.isFinite(Date.parse(value)) || new Date(value).toISOString() !== value) {

@@ -5,9 +5,9 @@ import { entryKey, readDocuments, type StateStore } from "./store.js";
 import { synchronizeStores } from "./synchronize.js";
 import {
   DEFAULT_HISTORY_RETENTION_MS, SCHEMA_VERSION, type FavoriteLevel, type FilterEntry, type FilterValue,
-  type StateChange, type StateEntry, type SynchronizeResult, type ThreadState, type SyncLevel, type SyncPolicy, type TabState,
+  type ApplicationSnapshot, type StateChange, type StateDocument, type StateEntry, type SynchronizeResult, type ThreadState, type SyncLevel, type SyncPolicy, type TabState,
 } from "./types.js";
-import { assertChange, assertDeviceId, assertFavoriteLevel, assertInteger, assertNonEmptyString, assertSyncPolicy } from "./validation.js";
+import { assertChange, assertDeviceId, assertDocument, assertFavoriteLevel, assertInteger, assertNonEmptyString, assertSyncPolicy } from "./validation.js";
 
 export interface BbsSyncOptions extends SyncPolicy {
   readonly storage: StateStore;
@@ -23,6 +23,7 @@ export class BbsSync {
   readonly historyRetentionMs: number;
   private readonly clock: () => Date;
   private updateQueue: Promise<void> = Promise.resolve();
+  private reservedRevision = 0;
 
   constructor(options: BbsSyncOptions) {
     assertDeviceId(options.deviceId);
@@ -36,6 +37,18 @@ export class BbsSync {
 
   /** Apply distinct keys together, with one logical revision and one file write. */
   async update(changes: readonly StateChange[]): Promise<void> {
+    return this.applyUpdate(changes);
+  }
+
+  /** Persist the prepared document in an application journal BEFORE saving it.
+   * Replay journaled documents with commitPreparedUpdate before new updates on startup.
+   * The callback must not call back into this instance's queued methods.
+   */
+  async updateWithJournal(changes: readonly StateChange[], journal: (document: StateDocument) => Promise<void>): Promise<void> {
+    return this.applyUpdate(changes, journal);
+  }
+
+  private async applyUpdate(changes: readonly StateChange[], journal?: (document: StateDocument) => Promise<void>): Promise<void> {
     const keys = new Set<string>();
     for (const change of changes) {
       assertChange(change);
@@ -51,20 +64,58 @@ export class BbsSync {
       for (const change of copy) if (change.key[0] === "favorite" && change.value !== null) favorites.add(change.key[1]);
       const allowed = copy.filter((change) => canWrite(change, this, favorites));
       if (allowed.length === 0) return;
-      let maximum = 0;
+      let maximum = this.reservedRevision;
       for (const document of documents) maximum = Math.max(maximum, document.revision);
       if (maximum === Number.MAX_SAFE_INTEGER) throw new RangeError("logical revision exhausted; update cannot be saved");
       const revision = maximum + 1;
+      if (journal !== undefined) this.reservedRevision = revision;
       const entries: StateEntry[] = allowed.map((change) => ({ ...change, revision }));
-      await this.storage.writeDocument({
+      const document: StateDocument = {
         v: SCHEMA_VERSION,
         deviceId: this.deviceId,
         revision,
         entries: entries.sort((a, b) => compareStrings(entryKey(a.key), entryKey(b.key))),
-      });
+      };
+      if (journal !== undefined) await journal(structuredClone(document));
+      await this.storage.writeDocument(document);
     });
     this.updateQueue = operation.catch(() => undefined);
     return operation;
+  }
+
+  /** Retry an already journaled update without issuing a new revision. */
+  async commitPreparedUpdate(document: StateDocument): Promise<void> {
+    assertDocument(document);
+    if (document.deviceId !== this.deviceId) throw new TypeError("prepared update belongs to another device");
+    const copy = structuredClone(document);
+    const operation = this.updateQueue.then(async () => {
+      // Membership may have changed since preparation (including the prepared
+      // favorite removal itself). Replay the original scope, checking only
+      // supported levels; never reinterpret a saved intent against today's values.
+      if (copy.entries.some(({ key }) =>
+        (key[0] === "filter" && this.syncLevel < 3) ||
+        (key[0] === "tabs" && this.syncLevel < 4) ||
+        (key[0] === "post" && this.syncLevel < 5))) {
+        throw new TypeError("prepared update exceeds the current sync policy; restore its policy before replay");
+      }
+      this.reservedRevision = Math.max(this.reservedRevision, copy.revision);
+      await this.storage.writeDocument(copy);
+    });
+    this.updateQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
+  /** Replayable application state, including explicit deletions and their origins. */
+  async getApplicationSnapshot(): Promise<ApplicationSnapshot> {
+    await this.updateQueue;
+    const documents = await readDocuments(this.storage);
+    const now = this.clock();
+    const entries = mergeDocuments(filterDocuments(documents, createScope(documents, this, now)));
+    return {
+      evaluatedAt: now.toISOString(),
+      policy: { syncLevel: this.syncLevel, historyRetentionMs: this.historyRetentionMs },
+      entries: [...entries.values()],
+    };
   }
 
   async setThreadMetadata(threadId: string, title: string, url: string): Promise<void> {

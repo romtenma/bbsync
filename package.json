@@ -1,12 +1,20 @@
 {
   "name": "@romtenma/bbsync",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Simple per-device state synchronization for bulletin board clients",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "import": "./dist/http.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
@@ -17,16 +25,18 @@
     "dist/**/*.d.ts",
     "!dist/**/*.test.js",
     "!dist/**/*.test.d.ts",
-    "!dist/state-store.contract.js",
-    "!dist/state-store.contract.d.ts",
+    "examples/**/*.mjs",
     "docs/**/*.md",
+    "CHANGELOG.md",
     "README.md"
   ],
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/bbsync.test.js dist/sync-level.test.js dist/local-state-store.contract.test.js dist/server.test.js",
-    "prepack": "npm test"
+    "test": "npm run build && node --test dist/bbsync.test.js dist/sync-level.test.js dist/local-state-store.contract.test.js dist/server.test.js dist/application-snapshot.test.js dist/http-state-store.test.js dist/adapter.test.js",
+    "test:package": "node scripts/test-package.mjs",
+    "benchmark": "npm run build && node scripts/benchmark.mjs",
+    "prepack": "npm test && npm run test:package"
   },
   "repository": {
     "type": "git",

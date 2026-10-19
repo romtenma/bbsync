@@ -14,3 +14,9 @@ export class DocumentConflictError extends BbsyncError {
     super(`device document conflict: ${deviceId}/${revision}`);
   }
 }
+
+export class HttpStateStoreError extends BbsyncError {
+  constructor(readonly status: number, message: string) { super(message); }
+}
+
+export class InitializationError extends BbsyncError {}
